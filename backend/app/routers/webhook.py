@@ -81,10 +81,12 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
     employee_email = fields.get("employee_email_id") or sheets_service.lookup_employee_email(assigned_to, config)
     assigned_name  = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
     assigned_email = fields.get("assigned_email_id") or sheets_service.lookup_employee_email(sender_name, config)
-    client_name, client_matched = sheets_service.lookup_customer_name(fields.get("client_name", ""), config)
-    client_warning = "" if client_matched or not client_name else (
-        f"\n⚠️ Client *{client_name}* was not found in the Config list. "
-        f"Please reply:\n`/update {'{TASK_ID}'} client: <correct client name>`\nto fix it."
+    raw_client = fields.get("client_name", "")
+    client_name, client_matched = sheets_service.lookup_customer_name(raw_client, config)
+    client_warning = "" if client_matched or not raw_client else (
+        f"\n⚠️ Client *{raw_client}* was not found in the Config list. "
+        f"Please use `/add-client <correct name>` to add it, then reply:\n"
+        f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
     )
 
     task_id = sheets_service.get_next_task_id()
@@ -152,10 +154,12 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
         employee_email = fields.get("employee_email_id") or sheets_service.lookup_employee_email(assigned_to, config)
         assigned_name  = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
         assigned_email = fields.get("assigned_email_id") or sheets_service.lookup_employee_email(sender_name, config)
-        client_name, client_matched = sheets_service.lookup_customer_name(fields.get("client_name", ""), config)
-        client_warning = "" if client_matched or not client_name else (
-            f"\n⚠️ Client *{client_name}* was not found in the Config list. "
-            f"Please reply:\n`/update {{TASK_ID}} client: <correct client name>`\nto fix it."
+        raw_client = fields.get("client_name", "")
+        client_name, client_matched = sheets_service.lookup_customer_name(raw_client, config)
+        client_warning = "" if client_matched or not raw_client else (
+            f"\n⚠️ Client *{raw_client}* was not found in the Config list. "
+            f"Please use `/add-client <correct name>` to add it, then reply:\n"
+            f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
         )
 
         task_id = sheets_service.get_next_task_id()

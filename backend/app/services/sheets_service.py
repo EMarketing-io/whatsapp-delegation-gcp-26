@@ -97,7 +97,7 @@ def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
     for customer in config["customers"]:
         if needle in customer.lower() or customer.lower() in needle:
             return customer, True
-    return mentioned.strip(), False  # keep what was said, flag as unmatched
+    return "", False  # no match — leave blank, caller will warn user
 
 
 def _find_employee(name: str, config: dict) -> tuple[str, str]:
