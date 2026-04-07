@@ -1,0 +1,50 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -t
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - ./backend
+
+  # Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_SERVICE}'
+      - --image
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA'
+      - --region
+      - '${_REGION}'
+      - --platform
+      - managed
+      - --allow-unauthenticated
+      - --min-instances
+      - '1'
+      - --set-secrets
+      - >-
+        WA_PRODUCT_ID=WA_PRODUCT_ID:latest,
+        WA_TOKEN=WA_TOKEN:latest,
+        WA_PHONE_ID=WA_PHONE_ID:latest,
+        WA_BASE_URL=WA_BASE_URL:latest,
+        OPENAI_API_KEY=OPENAI_API_KEY:latest,
+        GOOGLE_SHEET_ID=GOOGLE_SHEET_ID:latest,
+        GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT=GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT:latest,
+        GOOGLE_DRIVE_FOLDER_ID=GOOGLE_DRIVE_FOLDER_ID:latest,
+        FRONTEND_URL=FRONTEND_URL:latest
+
+substitutions:
+  _REGION: asia-south1        # Change to your preferred region
+  _REPO: whatsapp-delegation  # Artifact Registry repo name
+  _SERVICE: whatsapp-backend  # Cloud Run service name
+
+options:
+  logging: CLOUD_LOGGING_ONLY
