@@ -146,9 +146,17 @@ def _find_employee(name: str, config: dict) -> tuple[str, str]:
     return "", ""
 
 
-def lookup_employee_full_name(name: str, config: dict) -> str:
+def lookup_employee_full_name(name: str, config: dict) -> tuple[str, bool]:
+    """
+    Returns (full_name, matched).
+    - ("Taaran Jain", True)  → found in Config
+    - ("", False)            → not found — leave blank, caller warns user
+    - ("", False)            → nothing provided
+    """
     full_name, _ = _find_employee(name, config)
-    return full_name or name  # fallback to original if no match
+    if full_name:
+        return full_name, True
+    return "", False
 
 
 def lookup_employee_email(name: str, config: dict) -> str:

@@ -77,9 +77,16 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
     config = sheets_service.get_config_lookup()
     fields = await openai_service.extract_task_fields(raw_text)
 
-    assigned_to    = sheets_service.lookup_employee_full_name(fields.get("assigned_to", ""), config)
+    raw_assigned_to = fields.get("assigned_to", "")
+    assigned_to, assignee_matched = sheets_service.lookup_employee_full_name(raw_assigned_to, config)
     employee_email = fields.get("employee_email_id") or sheets_service.lookup_employee_email(assigned_to, config)
-    assigned_name  = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
+    assignee_warning = "" if assignee_matched or not raw_assigned_to else (
+        f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the Config list. "
+        f"Please reply:\n`/update {{TASK_ID}} assigned_to: <correct name>`\nto fix this task."
+    )
+
+    assigned_name, _ = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
+    assigned_name = assigned_name or sender_name  # fallback to sender if not in Config
     assigned_email = fields.get("assigned_email_id") or sheets_service.lookup_employee_email(sender_name, config)
     raw_client = fields.get("client_name", "")
     client_name, client_matched = sheets_service.lookup_customer_name(raw_client, config)
@@ -118,7 +125,7 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
         "message_type":       raw_text,
     }
     sheets_service.append_task(task_data)
-    warning = (client_warning + dept_warning).replace("{TASK_ID}", task_id)
+    warning = (assignee_warning + client_warning + dept_warning).replace("{TASK_ID}", task_id)
     return task_data, warning
 
 
@@ -157,9 +164,16 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
         config = sheets_service.get_config_lookup()
         fields = await openai_service.extract_task_fields(english_text)
 
-        assigned_to    = sheets_service.lookup_employee_full_name(fields.get("assigned_to", ""), config)
+        raw_assigned_to = fields.get("assigned_to", "")
+        assigned_to, assignee_matched = sheets_service.lookup_employee_full_name(raw_assigned_to, config)
         employee_email = fields.get("employee_email_id") or sheets_service.lookup_employee_email(assigned_to, config)
-        assigned_name  = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
+        assignee_warning = "" if assignee_matched or not raw_assigned_to else (
+            f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the Config list. "
+            f"Please reply:\n`/update {{TASK_ID}} assigned_to: <correct name>`\nto fix this task."
+        )
+
+        assigned_name, _ = sheets_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
+        assigned_name = assigned_name or sender_name  # fallback to sender if not in Config
         assigned_email = fields.get("assigned_email_id") or sheets_service.lookup_employee_email(sender_name, config)
         raw_client = fields.get("client_name", "")
         client_name, client_matched = sheets_service.lookup_customer_name(raw_client, config)
@@ -199,7 +213,7 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             "message_type":       f"[Voice] {original_text}" if original_text == english_text else f"[Voice] {original_text} | [EN] {english_text}",
         }
         sheets_service.append_task(task_data)
-        warning = (client_warning + dept_warning).replace("{TASK_ID}", task_id)
+        warning = (assignee_warning + client_warning + dept_warning).replace("{TASK_ID}", task_id)
         return task_data, warning
     finally:
         os.unlink(tmp.name)
