@@ -4,7 +4,7 @@ Google Sheets service.
 Tabs:
   Tasks        — A:R  (main task data)
   Message Logs — A:F  (raw log)
-  Config       — A: Name, B: Mail ID, D: Customer Name
+  Config       — A: Name, B: Mail ID, D: Customer Name, E: Departments
 """
 import json
 from datetime import datetime
@@ -56,31 +56,36 @@ def get_config_lookup() -> dict:
     """
     Returns:
       {
-        "employees": { "Taaran Jain": "jain.taaran@e-marketing.io", ... },
-        "customers":  ["Acme Corp", "Bikaner Polymers", ...]
+        "employees":     { name_lower: email },
+        "employee_names":{ name_lower: display_name },
+        "customers":     ["Acme Corp", ...],
+        "departments":   ["Google Ads", "Meta Ads", ...]
       }
     """
     service = _get_service()
     result = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=settings.google_sheet_id, range="Config!A2:D")
+        .get(spreadsheetId=settings.google_sheet_id, range="Config!A2:E")
         .execute()
     )
     rows = result.get("values", [])
-    employees = {}      # {name_lower: email}
-    employee_names = {} # {name_lower: display_name}
+    employees = {}
+    employee_names = {}
     customers = []
+    departments = []
     for row in rows:
-        row += [""] * (4 - len(row))
-        name, email, _, customer = row[0], row[1], row[2], row[3]
+        row += [""] * (5 - len(row))
+        name, email, _, customer, department = row[0], row[1], row[2], row[3], row[4]
         if name and email:
             key = name.strip().lower()
             employees[key] = email.strip()
             employee_names[key] = name.strip()
         if customer:
             customers.append(customer.strip())
-    return {"employees": employees, "employee_names": employee_names, "customers": customers}
+        if department:
+            departments.append(department.strip())
+    return {"employees": employees, "employee_names": employee_names, "customers": customers, "departments": departments}
 
 
 def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
@@ -97,6 +102,23 @@ def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
     for customer in config["customers"]:
         if needle in customer.lower() or customer.lower() in needle:
             return customer, True
+    return "", False  # no match — leave blank, caller will warn user
+
+
+def lookup_department_name(mentioned: str, config: dict) -> tuple[str, bool]:
+    """
+    Match a partial/full department name against Config Departments (col E).
+    Returns (full_name, matched):
+      - ("Google Ads", True)  → partial match found
+      - ("", False)           → no match — leave blank, warn user
+      - ("", False)           → nothing mentioned
+    """
+    if not mentioned or not mentioned.strip():
+        return "", False
+    needle = mentioned.strip().lower()
+    for dept in config["departments"]:
+        if needle in dept.lower() or dept.lower() in needle:
+            return dept, True
     return "", False  # no match — leave blank, caller will warn user
 
 

@@ -89,6 +89,13 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
         f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
     )
 
+    raw_dept = fields.get("department", "")
+    department, dept_matched = sheets_service.lookup_department_name(raw_dept, config)
+    dept_warning = "" if dept_matched or not raw_dept else (
+        f"\n⚠️ Department *{raw_dept}* was not found in the Config list. "
+        f"Please reply:\n`/update {{TASK_ID}} department: <correct department>`\nto fix this task."
+    )
+
     task_id = sheets_service.get_next_task_id()
     task_data = {
         "timestamp":          datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -102,7 +109,7 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
         "priority":           fields.get("priority", "Medium"),
         "approval_needed":    "Yes" if fields.get("approval_needed") else "No",
         "client_name":        client_name,
-        "department":         fields.get("department", ""),
+        "department":         department,
         "assigned_name":      assigned_name,
         "assigned_email_id":  assigned_email,
         "comments":           fields.get("comments", ""),
@@ -111,7 +118,7 @@ async def _process_text(raw_text: str, sender: str, sender_name: str) -> tuple[d
         "message_type":       raw_text,
     }
     sheets_service.append_task(task_data)
-    warning = client_warning.replace("{TASK_ID}", task_id) if client_warning else ""
+    warning = (client_warning + dept_warning).replace("{TASK_ID}", task_id)
     return task_data, warning
 
 
@@ -162,6 +169,13 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
         )
 
+        raw_dept = fields.get("department", "")
+        department, dept_matched = sheets_service.lookup_department_name(raw_dept, config)
+        dept_warning = "" if dept_matched or not raw_dept else (
+            f"\n⚠️ Department *{raw_dept}* was not found in the Config list. "
+            f"Please reply:\n`/update {{TASK_ID}} department: <correct department>`\nto fix this task."
+        )
+
         task_id = sheets_service.get_next_task_id()
         task_data = {
             "timestamp":          datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -175,7 +189,7 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             "priority":           fields.get("priority", "Medium"),
             "approval_needed":    "Yes" if fields.get("approval_needed") else "No",
             "client_name":        client_name,
-            "department":         fields.get("department", ""),
+            "department":         department,
             "assigned_name":      assigned_name,
             "assigned_email_id":  assigned_email,
             "comments":           fields.get("comments", ""),
@@ -185,7 +199,7 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             "message_type":       f"[Voice] {original_text}" if original_text == english_text else f"[Voice] {original_text} | [EN] {english_text}",
         }
         sheets_service.append_task(task_data)
-        warning = client_warning.replace("{TASK_ID}", task_id) if client_warning else ""
+        warning = (client_warning + dept_warning).replace("{TASK_ID}", task_id)
         return task_data, warning
     finally:
         os.unlink(tmp.name)
