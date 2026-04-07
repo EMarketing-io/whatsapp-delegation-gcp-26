@@ -4,6 +4,7 @@ Uses OpenAI to:
 2. Extract structured task fields from raw text (GPT-4o)
 """
 import json
+from datetime import date
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -14,6 +15,7 @@ client = AsyncOpenAI(api_key=settings.openai_api_key)
 
 EXTRACTION_PROMPT = """
 You are a task extraction assistant for a delegation app.
+Today's date is {today}.
 Given the raw message below, extract the following fields and return ONLY valid JSON.
 If a field cannot be determined, use null.
 
@@ -21,7 +23,7 @@ Fields to extract:
 - task_description: string — concise summary of what needs to be done
 - assigned_to: string — person's name the task is for
 - employee_email_id: string — assignee's email if explicitly mentioned
-- target_date: string — deadline in YYYY-MM-DD format, or null
+- target_date: string — deadline in YYYY-MM-DD format. Resolve relative dates like "today", "tomorrow", "next Monday", "after 5 days", "end of week" using today's date. Use null only if no date is mentioned at all.
 - priority: one of ["Low", "Medium", "High", "Critical"]
 - approval_needed: boolean — true if approval/sign-off is mentioned
 - client_name: string — client or company name if mentioned (partial names are fine, write exactly as mentioned)
@@ -64,7 +66,7 @@ async def transcribe_audio(audio_path: str) -> tuple[str, str]:
 
 async def extract_task_fields(raw_message: str) -> dict:
     """Extract structured task fields from raw text using GPT-4o."""
-    prompt = EXTRACTION_PROMPT.format(message=raw_message)
+    prompt = EXTRACTION_PROMPT.format(today=date.today().isoformat(), message=raw_message)
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
@@ -77,6 +79,7 @@ async def extract_task_fields(raw_message: str) -> dict:
 
 UPDATE_PROMPT = """
 You are a task update assistant. The user is filling in missing details for a task.
+Today's date is {today}.
 Extract only the fields they are providing and return ONLY valid JSON.
 Use null for any field not mentioned.
 
@@ -85,7 +88,7 @@ Updatable fields:
 - department: string
 - approval_needed: "Yes" or "No"
 - comments: string
-- target_date: string — YYYY-MM-DD format
+- target_date: string — YYYY-MM-DD format. Resolve relative dates like "today", "tomorrow", "next Monday", "after 5 days" using today's date.
 - priority: one of ["Low", "Medium", "High", "Critical"]
 - assigned_to: string — assignee name
 - client_name: string
@@ -101,7 +104,7 @@ Respond with ONLY the JSON object, no markdown, no explanation.
 
 async def extract_update_fields(raw_message: str) -> dict:
     """Extract field updates from a /update message using GPT-4o."""
-    prompt = UPDATE_PROMPT.format(message=raw_message)
+    prompt = UPDATE_PROMPT.format(today=date.today().isoformat(), message=raw_message)
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
