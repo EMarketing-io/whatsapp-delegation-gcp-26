@@ -1,11 +1,6 @@
-"""
-CRUD endpoints consumed by the Next.js frontend.
-Reads/writes Google Sheets instead of a database.
-"""
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-
 from app.services import sheets_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -30,7 +25,9 @@ def list_tasks(
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
-    return sheets_service.get_all_tasks(status=status, priority=priority, limit=limit, offset=offset)
+    return sheets_service.get_all_tasks(
+        status=status, priority=priority, limit=limit, offset=offset
+    )
 
 
 @router.get("/{task_id}")

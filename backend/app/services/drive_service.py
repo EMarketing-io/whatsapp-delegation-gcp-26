@@ -1,6 +1,3 @@
-"""
-Upload voice message files to Google Drive and return a shareable link.
-"""
 import json
 import mimetypes
 import os
@@ -17,7 +14,9 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 def _get_drive_service():
     if settings.google_service_account_json_content:
         info = json.loads(settings.google_service_account_json_content)
-        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=SCOPES
+        )
     else:
         creds = service_account.Credentials.from_service_account_file(
             settings.google_service_account_json, scopes=SCOPES
@@ -26,10 +25,6 @@ def _get_drive_service():
 
 
 def upload_audio_to_drive(local_path: str, filename: str) -> str:
-    """
-    Upload an audio file to the configured Google Drive folder.
-    Returns a publicly readable shareable URL.
-    """
     service = _get_drive_service()
 
     mime_type = mimetypes.guess_type(filename)[0] or "audio/ogg"

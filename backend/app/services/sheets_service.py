@@ -1,11 +1,3 @@
-"""
-Google Sheets service.
-
-Tabs:
-  Tasks        — A:R  (main task data)
-  Message Logs — A:F  (raw log)
-  Config       — A: Name, B: Mail ID, D: Customer Name, E: Departments
-"""
 import json
 from datetime import datetime
 
@@ -17,32 +9,48 @@ from app.config import settings
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 TASK_COLUMNS = [
-    "timestamp", "task_id", "task_description", "assigned_by",
-    "assignee_contact", "assigned_to", "employee_email_id", "target_date",
-    "priority", "approval_needed", "client_name", "department",
-    "assigned_name", "assigned_email_id", "comments", "source_link",
-    "status", "message_type", "updated_timestamp",
+    "timestamp",
+    "task_id",
+    "task_description",
+    "assigned_by",
+    "assignee_contact",
+    "assigned_to",
+    "employee_email_id",
+    "target_date",
+    "priority",
+    "approval_needed",
+    "client_name",
+    "department",
+    "assigned_name",
+    "assigned_email_id",
+    "comments",
+    "source_link",
+    "status",
+    "message_type",
+    "updated_timestamp",
 ]
 
 TASK_DISPLAY_NAMES = {
-    "task_description":  "Task Description",
-    "assigned_to":       "Assigned To",
+    "task_description": "Task Description",
+    "assigned_to": "Assigned To",
     "employee_email_id": "Employee Email",
-    "target_date":       "Target Date",
-    "priority":          "Priority",
-    "approval_needed":   "Approval Needed",
-    "client_name":       "Client Name",
-    "department":        "Department",
-    "assigned_name":     "Assigned Name",
+    "target_date": "Target Date",
+    "priority": "Priority",
+    "approval_needed": "Approval Needed",
+    "client_name": "Client Name",
+    "department": "Department",
+    "assigned_name": "Assigned Name",
     "assigned_email_id": "Assigned Email",
-    "comments":          "Comments",
+    "comments": "Comments",
 }
 
 
 def _get_service():
     if settings.google_service_account_json_content:
         info = json.loads(settings.google_service_account_json_content)
-        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=SCOPES
+        )
     else:
         creds = service_account.Credentials.from_service_account_file(
             settings.google_service_account_json, scopes=SCOPES
@@ -50,18 +58,7 @@ def _get_service():
     return build("sheets", "v4", credentials=creds)
 
 
-# ── Config sheet lookup ───────────────────────────────────────────────────────
-
 def get_config_lookup() -> dict:
-    """
-    Returns:
-      {
-        "employees":     { name_lower: email },
-        "employee_names":{ name_lower: display_name },
-        "customers":     ["Acme Corp", ...],
-        "departments":   ["Google Ads", "Meta Ads", ...]
-      }
-    """
     service = _get_service()
     result = (
         service.spreadsheets()
@@ -85,17 +82,15 @@ def get_config_lookup() -> dict:
             customers.append(customer.strip())
         if department:
             departments.append(department.strip())
-    return {"employees": employees, "employee_names": employee_names, "customers": customers, "departments": departments}
+    return {
+        "employees": employees,
+        "employee_names": employee_names,
+        "customers": customers,
+        "departments": departments,
+    }
 
 
 def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
-    """
-    Match a partial/full client name against Config Customer Names.
-    Returns (full_name, matched):
-      - ("Bikaner Polymers Pvt Ltd", True)  → partial match found in Config
-      - ("Singhdaur", False)                → mentioned but no match in Config
-      - ("", False)                         → nothing mentioned
-    """
     if not mentioned or not mentioned.strip():
         return "", False
     needle = mentioned.strip().lower()
@@ -106,13 +101,6 @@ def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
 
 
 def lookup_department_name(mentioned: str, config: dict) -> tuple[str, bool]:
-    """
-    Match a partial/full department name against Config Departments (col E).
-    Returns (full_name, matched):
-      - ("Google Ads", True)  → partial match found
-      - ("", False)           → no match — leave blank, warn user
-      - ("", False)           → nothing mentioned
-    """
     if not mentioned or not mentioned.strip():
         return "", False
     needle = mentioned.strip().lower()
@@ -123,11 +111,6 @@ def lookup_department_name(mentioned: str, config: dict) -> tuple[str, bool]:
 
 
 def _find_employee(name: str, config: dict) -> tuple[str, str]:
-    """
-    Returns (full_name, email) for the best matching employee.
-    Tries exact match first, then partial match.
-    Returns ("", "") if no match found.
-    """
     if not name:
         return "", ""
     needle = name.strip().lower()
@@ -147,12 +130,6 @@ def _find_employee(name: str, config: dict) -> tuple[str, str]:
 
 
 def lookup_employee_full_name(name: str, config: dict) -> tuple[str, bool]:
-    """
-    Returns (full_name, matched).
-    - ("Taaran Jain", True)  → found in Config
-    - ("", False)            → not found — leave blank, caller warns user
-    - ("", False)            → nothing provided
-    """
     full_name, _ = _find_employee(name, config)
     if full_name:
         return full_name, True
@@ -163,8 +140,6 @@ def lookup_employee_email(name: str, config: dict) -> str:
     _, email = _find_employee(name, config)
     return email
 
-
-# ── Task ID ───────────────────────────────────────────────────────────────────
 
 def get_next_task_id() -> str:
     service = _get_service()
@@ -177,8 +152,6 @@ def get_next_task_id() -> str:
     count = len(result.get("values", []))
     return f"TASK-{count:04d}"
 
-
-# ── Tasks ─────────────────────────────────────────────────────────────────────
 
 def append_task(task_data: dict) -> None:
     service = _get_service()
@@ -196,7 +169,9 @@ def append_task(task_data: dict) -> None:
     )
 
 
-def get_all_tasks(status: str = None, priority: str = None, limit: int = 100, offset: int = 0) -> list[dict]:
+def get_all_tasks(
+    status: str = None, priority: str = None, limit: int = 100, offset: int = 0
+) -> list[dict]:
     service = _get_service()
     result = (
         service.spreadsheets()
@@ -215,7 +190,7 @@ def get_all_tasks(status: str = None, priority: str = None, limit: int = 100, of
             continue
         tasks.append(task)
     tasks.reverse()
-    return tasks[offset: offset + limit]
+    return tasks[offset : offset + limit]
 
 
 def get_task_by_id(task_id: str) -> dict | None:
@@ -265,14 +240,10 @@ def update_task(task_id: str, updates: dict) -> dict | None:
 
 
 def mark_task_done(task_id: str) -> dict | None:
-    """Set status to Done and stamp updated_timestamp."""
     return update_task(task_id, {"status": "Done"})
 
 
-# ── Confirmation message builder ──────────────────────────────────────────────
-
 def build_confirmation_message(task: dict) -> str:
-    """Build the WhatsApp reply showing filled and pending fields."""
     filled = []
     pending = []
 
@@ -294,20 +265,17 @@ def build_confirmation_message(task: dict) -> str:
         lines.append("⏳ *Pending Details:*")
         lines.extend(pending)
         lines.append("")
-        lines.append(f"To fill pending details, reply:\n*/update {task['task_id']}*\nfollowed by the missing info in natural language.")
-        lines.append(f"\nExample:\n/update {task['task_id']} department: Marketing, email: john@acme.com, approval: yes")
+        lines.append(
+            f"To fill pending details, reply:\n*/update {task['task_id']}*\nfollowed by the missing info in natural language."
+        )
+        lines.append(
+            f"\nExample:\n/update {task['task_id']} department: Marketing, email: john@acme.com, approval: yes"
+        )
 
     return "\n".join(lines)
 
 
-# ── Message Logs ──────────────────────────────────────────────────────────────
-
 def add_client_to_config(client_name: str) -> bool:
-    """
-    Append a new customer name to col D of the Config sheet.
-    Finds the next empty row in col D and writes there.
-    Returns False if client already exists.
-    """
     service = _get_service()
 
     # Check if already exists
@@ -338,7 +306,9 @@ def add_client_to_config(client_name: str) -> bool:
     return True
 
 
-def log_message(sender: str, msg_type: str, raw_text: str, task_id: str = "", error: str = "") -> None:
+def log_message(
+    sender: str, msg_type: str, raw_text: str, task_id: str = "", error: str = ""
+) -> None:
     service = _get_service()
     row = [
         datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),

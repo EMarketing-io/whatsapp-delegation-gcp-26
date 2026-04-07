@@ -1,8 +1,3 @@
-"""
-Uses OpenAI to:
-1. Transcribe voice messages (Whisper)
-2. Extract structured task fields from raw text (GPT-4o)
-"""
 import json
 from datetime import date
 from pathlib import Path
@@ -42,11 +37,6 @@ Respond with ONLY the JSON object, no markdown, no explanation.
 
 
 async def transcribe_audio(audio_path: str) -> tuple[str, str]:
-    """
-    Transcribe and translate a voice message using Whisper.
-    Returns (original_transcription, english_translation).
-    If audio is already in English, both will be the same.
-    """
     with open(audio_path, "rb") as audio_file:
         original = await client.audio.transcriptions.create(
             model="whisper-1",
@@ -65,7 +55,6 @@ async def transcribe_audio(audio_path: str) -> tuple[str, str]:
 
 
 async def extract_task_fields(raw_message: str) -> dict:
-    """Extract structured task fields from raw text using GPT-4o."""
     prompt = EXTRACTION_PROMPT.format(today=date.today().isoformat(), message=raw_message)
     response = await client.chat.completions.create(
         model="gpt-4o",

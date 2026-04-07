@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     # Google Sheets
-    google_sheet_id: str                          # ← paste your Sheet ID here in .env
-    google_service_account_json: str = ""         # path to JSON file (local dev)
-    google_service_account_json_content: str = "" # full JSON string (Render env var)
+    google_sheet_id: str  # ← paste your Sheet ID here in .env
+    google_service_account_json: str = ""  # path to JSON file (local dev)
+    google_service_account_json_content: str = ""  # full JSON string (Render env var)
 
     # Google Drive (optional — voice uploads)
     google_drive_folder_id: str = ""
