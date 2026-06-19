@@ -61,8 +61,9 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     Returns (data, sender_phone, sender_name, chat_id).
     Raises ValueError if the payload isn't a MESSAGE_RECEIVED event.
 
-    Group message:   data.from = "GROUPID@g.us",  data.senderPhone = "919876543210"
-    Individual DM:   data.from = "919876543210@s.whatsapp.net",  no senderPhone
+    Group message:   data.from = "GROUPID@g.us"  → reply to the group JID
+    Individual DM:   data.from = "919876543210@s.whatsapp.net"  → reply to that number
+    Note: senderPhone in group payloads is a WhatsApp internal ID, not a real phone number.
     """
     if payload.get("event") != "MESSAGE_RECEIVED":
         raise ValueError(f"ignored event: {payload.get('event')}")
@@ -71,17 +72,22 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     if not data:
         raise ValueError("no data in payload")
 
-    # Prefer explicit senderPhone; fall back to stripping @s.whatsapp.net from `from`
-    raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
-    if not raw_phone:
-        from_jid = str(data.get("from", "")).strip()
-        if "@s.whatsapp.net" in from_jid:
-            raw_phone = from_jid.split("@")[0].lstrip("+")
+    from_jid = str(data.get("from", "")).strip()
+
+    if "@g.us" in from_jid:
+        # Group message — reply to the group so the response appears in the chat
+        chat_id = from_jid  # e.g. "120363400573269993@g.us"
+        raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
+    elif "@s.whatsapp.net" in from_jid:
+        # Direct message — reply to the sender's number
+        raw_phone = from_jid.split("@")[0].lstrip("+")
+        chat_id = raw_phone
+    else:
+        raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
+        chat_id = raw_phone
 
     sender_phone = f"+{raw_phone}" if raw_phone else ""
     sender_name = data.get("senderName") or sender_phone
-    # Waumfy outgoing API accepts plain phone number as `to`
-    chat_id = raw_phone
     return data, sender_phone, sender_name, chat_id
 
 
