@@ -66,6 +66,38 @@ async def extract_task_fields(raw_message: str) -> dict:
     return json.loads(content)
 
 
+INTENT_PROMPT = """
+You are an intent classifier for a WhatsApp task delegation bot.
+Classify the message below into exactly one intent.
+
+Intents:
+- "task"     : user is assigning or delegating a task to someone
+- "done"     : user is saying a task is finished/completed
+- "update"   : user wants to update details of an existing task
+- "status"   : user is asking about the status of a specific task
+- "my_tasks" : user wants to see their own pending tasks
+- "help"     : user wants to know how the bot works
+- "other"    : casual chat, greetings, unrelated content — do NOT create a task
+
+Message: \"\"\"{message}\"\"\"
+
+Return ONLY valid JSON with these keys:
+- intent: one of the values above
+- task_id: the TASK-XXXX id if mentioned, else null
+"""
+
+
+async def classify_intent(message: str) -> dict:
+    prompt = INTENT_PROMPT.format(message=message)
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)
+
+
 UPDATE_PROMPT = """
 You are a task update assistant. The user is filling in missing details for a task.
 Today's date is {today}.

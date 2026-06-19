@@ -404,6 +404,7 @@ async def webhook(request: Request):
             body: str = data.get("body", "")
             logger.info("Text body: %r", body)
 
+            # ── Explicit slash commands ──────────────────────────
             if body.lower().strip() == "/help":
                 await _send_reply(chat_id, HELP_MESSAGE)
                 return {"status": "ok"}
@@ -472,6 +473,76 @@ async def webhook(request: Request):
                 await _process_update(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
                 return {"status": "ok"}
+
+            # ── Plain natural language — classify with AI ────────
+            else:
+                intent_data = await openai_service.classify_intent(body)
+                intent = intent_data.get("intent", "other")
+                task_id = (intent_data.get("task_id") or "").upper()
+                logger.info("AI intent=%s task_id=%s", intent, task_id)
+
+                if intent == "task":
+                    task_data, warning = await _process_text(body, sender, sender_name)
+
+                elif intent == "done":
+                    if task_id:
+                        await _process_done(f"/done {task_id}", sender, chat_id)
+                    else:
+                        await _send_reply(chat_id, "Which task is done? Reply with:\n`/done TASK-0001`")
+                    sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    return {"status": "ok"}
+
+                elif intent == "update":
+                    if task_id:
+                        await _process_update(f"/update {task_id} {body}", sender, chat_id)
+                    else:
+                        await _send_reply(chat_id, "Which task to update? Reply with:\n`/update TASK-0001 <details>`")
+                    sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    return {"status": "ok"}
+
+                elif intent == "status":
+                    if task_id:
+                        task = sheets_service.get_task_by_id(task_id)
+                        if task:
+                            await _send_reply(chat_id, sheets_service.build_confirmation_message(task))
+                        else:
+                            await _send_reply(chat_id, f"❌ Task {task_id} not found.")
+                    else:
+                        await _send_reply(chat_id, "Which task? Reply with:\n`/status TASK-0001`")
+                    sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    return {"status": "ok"}
+
+                elif intent == "my_tasks":
+                    all_tasks = sheets_service.get_all_tasks()
+                    my_tasks = [
+                        t for t in all_tasks
+                        if (
+                            t.get("assignee_contact") == sender
+                            or t.get("assignee_contact") == f"+{sender}"
+                        )
+                        and t.get("status", "").lower() not in ("done", "completed", "cancelled")
+                    ]
+                    if not my_tasks:
+                        await _send_reply(chat_id, "✅ You have no pending tasks!")
+                    else:
+                        lines = [f"📋 *Your Pending Tasks ({len(my_tasks)})*\n"]
+                        for t in my_tasks:
+                            lines.append(
+                                f"• *{t.get('task_id')}* — {t.get('task_description') or 'No description'}\n"
+                                f"  Priority: {t.get('priority') or '—'} | Due: {t.get('target_date') or '—'} | Status: {t.get('status') or '—'}"
+                            )
+                        await _send_reply(chat_id, "\n".join(lines))
+                    sheets_service.log_message(sender, msg_type, body, "", "")
+                    return {"status": "ok"}
+
+                elif intent == "help":
+                    await _send_reply(chat_id, HELP_MESSAGE)
+                    return {"status": "ok"}
+
+                else:
+                    # "other" — casual chat, ignore silently
+                    logger.info("Ignoring non-task message (intent=other)")
+                    return {"status": "ignored"}
 
         elif msg_type in ("audio", "ptt", "voice"):
             media_url = data.get("url") or data.get("mediaUrl") or data.get("link")
