@@ -19,6 +19,9 @@ USER     = os.getenv("DB_USER",     "lpcliimp_eMarketing")
 PASSWORD = os.getenv("DB_PASSWORD", "oWAh9oAs$w#n")
 PORT     = int(os.getenv("DB_PORT", "3306"))
 
+# Only these tables will appear in the menu
+TABLES_TO_SHOW = ["users", "clients", "tasks", "message_logs"]
+
 # Columns to hide per table (too large or sensitive)
 SKIP = {
     "users":   ["password", "profile_image", "extra_off", "extra_access"],
@@ -103,21 +106,17 @@ def main():
     print("Connected\n")
 
     with conn:
-        with conn.cursor() as cur:
-            cur.execute("SHOW TABLES")
-            all_tables = [list(r.values())[0] for r in cur.fetchall()]
-
         while True:
             print("\n" + "=" * 50)
             print(f"  DATABASE: {DB}")
             print("=" * 50)
-            print(f"  0.  Show ALL tables")
-            for i, t in enumerate(all_tables, start=1):
+            print(f"  0.  Show ALL")
+            for i, t in enumerate(TABLES_TO_SHOW, start=1):
                 marker = "  *" if t in SKIP else "   "
-                print(f"{marker} {i:2}.  {t}")
+                print(f"{marker} {i}.  {t}")
             print("\n   q.  Quit")
             print("=" * 50)
-            print("  * = some columns hidden (sensitive/large data)")
+            print("  * = some columns hidden")
             choice = input("\nEnter number (or q to quit): ").strip().lower()
 
             if choice == "q":
@@ -126,16 +125,16 @@ def main():
 
             if choice == "0":
                 with conn.cursor() as cur:
-                    for t in all_tables:
+                    for t in TABLES_TO_SHOW:
                         show_table(cur, t)
                 continue
 
             try:
                 idx = int(choice)
-                if idx < 1 or idx > len(all_tables):
-                    print(f"  Enter a number between 1 and {len(all_tables)}")
+                if idx < 1 or idx > len(TABLES_TO_SHOW):
+                    print(f"  Enter a number between 1 and {len(TABLES_TO_SHOW)}")
                     continue
-                table = all_tables[idx - 1]
+                table = TABLES_TO_SHOW[idx - 1]
             except ValueError:
                 print("  Invalid input.")
                 continue
