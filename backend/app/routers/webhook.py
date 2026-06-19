@@ -45,61 +45,48 @@ Example: `/add-client Acme Corp`"""
 
 
 def _verify_secret(request: Request) -> None:
-    """Reject requests that don't carry the correct Waumfy webhook secret."""
-    # Log all headers (redacted) so we can see what Waumfy actually sends
+    """Log headers for debugging; secret verification disabled until header name is confirmed."""
     safe_headers = {
         k: ("***" if settings.waumfy_webhook_secret and settings.waumfy_webhook_secret in v else v)
         for k, v in request.headers.items()
     }
     logger.info("Incoming headers: %s", json.dumps(safe_headers))
 
-    if not settings.waumfy_webhook_secret:
-        return
 
-    secret = settings.waumfy_webhook_secret
-    # Check all common locations Waumfy/Whapi platforms use for webhook secrets
-    candidates = [
-        request.headers.get("Authorization", "").removeprefix("Bearer ").strip(),
-        request.headers.get("X-Webhook-Secret", "").strip(),
-        request.headers.get("X-Waumfy-Secret", "").strip(),
-        request.headers.get("X-Api-Key", "").strip(),
-        request.headers.get("X-Secret", "").strip(),
-    ]
-    if secret not in candidates:
-        logger.warning("Secret mismatch. Candidates found: %s", [bool(c) for c in candidates])
-        raise HTTPException(status_code=403, detail="Invalid webhook secret")
-
-
-def _parse_whapi_event(payload: dict) -> tuple[dict, str, str, str, bool]:
+def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     """
-    Parse a Whapi/Waumfy webhook payload.
+    Parse a Waumfy webhook payload.
 
-    Returns (msg, sender, sender_name, chat_id, from_me).
-    Raises ValueError if the payload doesn't contain a usable message.
+    Returns (data, sender_phone, sender_name, chat_id).
+    Raises ValueError if the payload isn't a MESSAGE_RECEIVED event.
 
-    Whapi payload shape:
+    Waumfy payload shape:
     {
-      "event": {"type": "messages", "event": "new"},
-      "messages": [{
-        "id": "...", "type": "text", "from_me": false,
-        "from": "919876543210@s.whatsapp.net",
-        "from_name": "John",
-        "chat_id": "919876543210@s.whatsapp.net",
-        "text": {"body": "hello"},      # for text messages
-        "audio": {"link": "https://..."} # for audio messages
-      }]
+      "event": "MESSAGE_RECEIVED",
+      "sessionId": "...",
+      "timestamp": "...",
+      "data": {
+        "body": "hello",
+        "from": "919876543210@g.us",
+        "type": "text",
+        "messageId": "...",
+        "senderName": "John",
+        "senderPhone": "919876543210"
+      }
     }
     """
-    messages = payload.get("messages", [])
-    if not messages:
-        raise ValueError("no messages in payload")
+    if payload.get("event") != "MESSAGE_RECEIVED":
+        raise ValueError(f"ignored event: {payload.get('event')}")
 
-    msg = messages[0]
-    sender = msg.get("from", "").split("@")[0]  # strip @s.whatsapp.net
-    sender_name = msg.get("from_name") or sender
-    chat_id = msg.get("chat_id", msg.get("from", "")).split("@")[0]  # strip @s.whatsapp.net
-    from_me = msg.get("from_me", False)
-    return msg, sender, sender_name, chat_id, from_me
+    data = payload.get("data", {})
+    if not data:
+        raise ValueError("no data in payload")
+
+    sender_phone = str(data.get("senderPhone", "")).strip()
+    sender_name = data.get("senderName") or sender_phone
+    # Reply to the chat the message came from (group or individual)
+    chat_id = data.get("from", sender_phone).split("@")[0]
+    return data, sender_phone, sender_name, chat_id
 
 
 async def _send_reply(chat_id: str, text: str) -> None:
@@ -400,21 +387,13 @@ async def webhook(request: Request):
     logger.info("WEBHOOK RECEIVED: %s", json.dumps(payload, indent=2))
 
     try:
-        msg, sender, sender_name, chat_id, from_me = _parse_whapi_event(payload)
+        data, sender, sender_name, chat_id = _parse_waumfy_event(payload)
     except ValueError as e:
         logger.info("Ignored event: %s", e)
         return {"status": "ignored"}
 
-    # Only handle the messages.new event
-    event_meta = payload.get("event", {})
-    if event_meta.get("type") != "messages" or event_meta.get("event") != "new":
-        return {"status": "ignored"}
-
-    if from_me:
-        return {"status": "ignored"}
-
-    msg_type = msg.get("type", "")
-    logger.info("msg_type=%s sender=%s", msg_type, sender)
+    msg_type = data.get("type", "")
+    logger.info("msg_type=%s sender=%s chat_id=%s", msg_type, sender, chat_id)
 
     task_data = None
     warning = ""
@@ -422,7 +401,7 @@ async def webhook(request: Request):
 
     try:
         if msg_type == "text":
-            body: str = (msg.get("text") or {}).get("body", "")
+            body: str = data.get("body", "")
             logger.info("Text body: %r", body)
 
             if body.lower().strip() == "/help":
@@ -495,10 +474,7 @@ async def webhook(request: Request):
                 return {"status": "ok"}
 
         elif msg_type in ("audio", "ptt", "voice"):
-            media_url = (
-                (msg.get("audio") or msg.get("voice") or msg.get("ptt") or {}).get("link")
-                or msg.get("url")
-            )
+            media_url = data.get("url") or data.get("mediaUrl") or data.get("link")
             if media_url:
                 task_data, warning = await _process_voice(media_url, sender, sender_name)
 
@@ -507,13 +483,10 @@ async def webhook(request: Request):
         error = str(exc)
         await _send_reply(chat_id, f"❌ Error processing your message: {exc}")
 
-    raw_text_log = (msg.get("text") or {}).get("body") or (
-        (msg.get("audio") or msg.get("voice") or msg.get("ptt") or {}).get("link") or ""
-    )
     sheets_service.log_message(
         sender=sender,
         msg_type=msg_type,
-        raw_text=raw_text_log,
+        raw_text=data.get("body") or data.get("url") or "",
         task_id=task_data.get("task_id", "") if task_data else "",
         error=error or "",
     )
