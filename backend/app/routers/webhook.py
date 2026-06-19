@@ -82,10 +82,11 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     if not data:
         raise ValueError("no data in payload")
 
-    sender_phone = str(data.get("senderPhone", "")).strip()
+    raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
+    sender_phone = f"+{raw_phone}" if raw_phone else ""
     sender_name = data.get("senderName") or sender_phone
-    # Reply directly to the sender's phone number
-    chat_id = sender_phone
+    # Reply directly to the sender's phone number (without + for Waumfy API)
+    chat_id = raw_phone
     return data, sender_phone, sender_name, chat_id
 
 
