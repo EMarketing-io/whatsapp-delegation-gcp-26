@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
-from app.services import openai_service, drive_service, sheets_service
+from app.services import openai_service, drive_service, sheets_service, db_service
 
 logger = logging.getLogger("webhook")
 router = APIRouter()
@@ -187,6 +187,7 @@ async def _process_text(
         "message_type": raw_text,
     }
     sheets_service.append_task(task_data)
+    await db_service.insert_task(task_data)
     warning = (assignee_warning + client_warning + dept_warning).replace(
         "{TASK_ID}", task_id
     )
@@ -309,6 +310,7 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> tuple
             ),
         }
         sheets_service.append_task(task_data)
+        await db_service.insert_task(task_data)
         warning = (assignee_warning + client_warning + dept_warning).replace(
             "{TASK_ID}", task_id
         )
@@ -325,6 +327,7 @@ async def _process_done(raw_text: str, sender: str, chat_id: str) -> None:
 
     task_id = match.group(1).upper()
     result = sheets_service.mark_task_done(task_id)
+    await db_service.mark_task_done(task_id)
 
     if result is None:
         await _send_reply(chat_id, f"❌ Task {task_id} not found.")
@@ -362,6 +365,7 @@ async def _process_update(raw_text: str, sender: str, chat_id: str) -> None:
         return
 
     result = sheets_service.update_task(task_id, updates)
+    await db_service.update_task(task_id, updates)
 
     if result is None:
         await _send_reply(chat_id, f"❌ Task {task_id} not found.")
@@ -464,16 +468,19 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, f"⚠️ Client *{client_name}* already exists in Config.")
                 sheets_service.log_message(sender, msg_type, body, "", "")
+                await db_service.log_message(sender, msg_type, body)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/done"):
                 await _process_done(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
+                await db_service.log_message(sender, msg_type, body)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/update"):
                 await _process_update(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
+                await db_service.log_message(sender, msg_type, body)
                 return {"status": "ok"}
 
             # ── Plain natural language — classify with AI ────────
@@ -492,6 +499,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task is done? Reply with:\n`/done TASK-0001`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    await db_service.log_message(sender, msg_type, body, task_id)
                     return {"status": "ok"}
 
                 elif intent == "update":
@@ -500,6 +508,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task to update? Reply with:\n`/update TASK-0001 <details>`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    await db_service.log_message(sender, msg_type, body, task_id)
                     return {"status": "ok"}
 
                 elif intent == "status":
@@ -512,6 +521,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task? Reply with:\n`/status TASK-0001`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
+                    await db_service.log_message(sender, msg_type, body, task_id)
                     return {"status": "ok"}
 
                 elif intent == "my_tasks":
@@ -535,6 +545,7 @@ async def webhook(request: Request):
                             )
                         await _send_reply(chat_id, "\n".join(lines))
                     sheets_service.log_message(sender, msg_type, body, "", "")
+                    await db_service.log_message(sender, msg_type, body)
                     return {"status": "ok"}
 
                 elif intent == "help":
@@ -556,13 +567,10 @@ async def webhook(request: Request):
         error = str(exc)
         await _send_reply(chat_id, f"❌ Error processing your message: {exc}")
 
-    sheets_service.log_message(
-        sender=sender,
-        msg_type=msg_type,
-        raw_text=data.get("body") or data.get("url") or "",
-        task_id=task_data.get("task_id", "") if task_data else "",
-        error=error or "",
-    )
+    raw = data.get("body") or data.get("url") or ""
+    tid = task_data.get("task_id", "") if task_data else ""
+    sheets_service.log_message(sender=sender, msg_type=msg_type, raw_text=raw, task_id=tid, error=error or "")
+    await db_service.log_message(sender, msg_type, raw, tid, error or "")
 
     if task_data:
         confirmation = sheets_service.build_confirmation_message(task_data)
