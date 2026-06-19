@@ -46,12 +46,27 @@ Example: `/add-client Acme Corp`"""
 
 def _verify_secret(request: Request) -> None:
     """Reject requests that don't carry the correct Waumfy webhook secret."""
+    # Log all headers (redacted) so we can see what Waumfy actually sends
+    safe_headers = {
+        k: ("***" if settings.waumfy_webhook_secret and settings.waumfy_webhook_secret in v else v)
+        for k, v in request.headers.items()
+    }
+    logger.info("Incoming headers: %s", json.dumps(safe_headers))
+
     if not settings.waumfy_webhook_secret:
         return
-    # Waumfy sends the secret as a Bearer token in the Authorization header
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    if token != settings.waumfy_webhook_secret:
+
+    secret = settings.waumfy_webhook_secret
+    # Check all common locations Waumfy/Whapi platforms use for webhook secrets
+    candidates = [
+        request.headers.get("Authorization", "").removeprefix("Bearer ").strip(),
+        request.headers.get("X-Webhook-Secret", "").strip(),
+        request.headers.get("X-Waumfy-Secret", "").strip(),
+        request.headers.get("X-Api-Key", "").strip(),
+        request.headers.get("X-Secret", "").strip(),
+    ]
+    if secret not in candidates:
+        logger.warning("Secret mismatch. Candidates found: %s", [bool(c) for c in candidates])
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
 
