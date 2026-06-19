@@ -31,20 +31,19 @@ steps:
       - "1"
       - --set-secrets
       - >-
-        WA_PRODUCT_ID=WA_PRODUCT_ID:latest,
-        WA_TOKEN=WA_TOKEN:latest,
-        WA_PHONE_ID=WA_PHONE_ID:latest,
-        WA_BASE_URL=WA_BASE_URL:latest,
         OPENAI_API_KEY=OPENAI_API_KEY:latest,
         GOOGLE_SHEET_ID=GOOGLE_SHEET_ID:latest,
         GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT=GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT:latest,
         GOOGLE_DRIVE_FOLDER_ID=GOOGLE_DRIVE_FOLDER_ID:latest,
-        FRONTEND_URL=FRONTEND_URL:latest
+        FRONTEND_URL=FRONTEND_URL:latest,
+        WAUMFY_WEBHOOK_SECRET=WAUMFY_WEBHOOK_SECRET:latest,
+        WAUMFY_SEND_URL=WAUMFY_SEND_URL:latest,
+        WAUMFY_API_KEY=WAUMFY_API_KEY:latest
 
 substitutions:
-  _REGION: asia-south1 # Change to your preferred region
-  _REPO: whatsapp-delegation # Artifact Registry repo name
-  _SERVICE: whatsapp-backend # Cloud Run service name
+  _REGION: asia-south1
+  _REPO: whatsapp-delegation
+  _SERVICE: whatsapp-backend
 
 options:
   logging: CLOUD_LOGGING_ONLY
