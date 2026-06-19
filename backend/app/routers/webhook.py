@@ -61,10 +61,9 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     Returns (data, sender_phone, sender_name, chat_id).
     Raises ValueError if the payload isn't a MESSAGE_RECEIVED event.
 
-    Group message:  data.from = "GROUPID@g.us"               → reply to the group JID
-    Individual DM:  data.from = "919876543210@s.whatsapp.net"  → reply to senderPhone
-    LID DM:         data.from = "XXXXX@lid"                    → reply to senderPhone
-    In all cases data.senderPhone is the real E.164 phone number of the sender.
+    Waumfy now includes chatType: 'individual' or 'group' in every payload.
+    Use data.from directly as chat_id — Waumfy's send API handles
+    @s.whatsapp.net, @lid, and @g.us routing internally (normalizeJid).
     """
     if payload.get("event") != "MESSAGE_RECEIVED":
         raise ValueError(f"ignored event: {payload.get('event')}")
@@ -75,23 +74,14 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
 
     from_jid = str(data.get("from", "")).strip()
     raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
+    chat_type = data.get("chatType", "")  # "individual" or "group"
 
-    if "@g.us" in from_jid:
-        # Group message — reply to the group so the response appears in the chat
-        chat_id = from_jid  # e.g. "120363400573269993@g.us"
-    elif "@s.whatsapp.net" in from_jid:
-        # Direct message (standard format) — senderPhone is the real number
-        if not raw_phone:
-            raw_phone = from_jid.split("@")[0].lstrip("+")
-        chat_id = raw_phone
-    elif "@lid" in from_jid:
-        # Direct message (privacy-protected) — prefer senderPhone, fall back to LID
-        chat_id = raw_phone if raw_phone else from_jid
-    else:
-        chat_id = raw_phone
+    # Use from JID directly — Waumfy normalizes @s.whatsapp.net, @lid, @g.us on their end
+    chat_id = from_jid
 
     sender_phone = f"+{raw_phone}" if raw_phone else ""
     sender_name = data.get("senderName") or sender_phone
+    logger.info("chat_type=%s from=%s senderPhone=%s", chat_type, from_jid, raw_phone)
     return data, sender_phone, sender_name, chat_id
 
 
