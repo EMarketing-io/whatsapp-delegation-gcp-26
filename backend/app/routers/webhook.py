@@ -61,20 +61,8 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     Returns (data, sender_phone, sender_name, chat_id).
     Raises ValueError if the payload isn't a MESSAGE_RECEIVED event.
 
-    Waumfy payload shape:
-    {
-      "event": "MESSAGE_RECEIVED",
-      "sessionId": "...",
-      "timestamp": "...",
-      "data": {
-        "body": "hello",
-        "from": "919876543210@g.us",
-        "type": "text",
-        "messageId": "...",
-        "senderName": "John",
-        "senderPhone": "919876543210"
-      }
-    }
+    Group message:   data.from = "GROUPID@g.us",  data.senderPhone = "919876543210"
+    Individual DM:   data.from = "919876543210@s.whatsapp.net",  no senderPhone
     """
     if payload.get("event") != "MESSAGE_RECEIVED":
         raise ValueError(f"ignored event: {payload.get('event')}")
@@ -83,10 +71,16 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     if not data:
         raise ValueError("no data in payload")
 
+    # Prefer explicit senderPhone; fall back to stripping @s.whatsapp.net from `from`
     raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
+    if not raw_phone:
+        from_jid = str(data.get("from", "")).strip()
+        if "@s.whatsapp.net" in from_jid:
+            raw_phone = from_jid.split("@")[0].lstrip("+")
+
     sender_phone = f"+{raw_phone}" if raw_phone else ""
     sender_name = data.get("senderName") or sender_phone
-    # Reply directly to the sender's phone number (without + for Waumfy API)
+    # Waumfy outgoing API accepts plain phone number as `to`
     chat_id = raw_phone
     return data, sender_phone, sender_name, chat_id
 
