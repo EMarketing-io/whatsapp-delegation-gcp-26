@@ -13,20 +13,16 @@ except ImportError:
     print("pymysql not installed. Run:  pip install pymysql")
     sys.exit(1)
 
-# ── Credentials ───────────────────────────────────────────────────────────────
 HOST     = os.getenv("DB_HOST",     "162.241.85.98")
 DB       = os.getenv("DB_NAME",     "lpcliimp_taskMarketing")
 USER     = os.getenv("DB_USER",     "lpcliimp_eMarketing")
 PASSWORD = os.getenv("DB_PASSWORD", "oWAh9oAs$w#n")
 PORT     = int(os.getenv("DB_PORT", "3306"))
 
-# Tables to inspect and columns to hide (too large or sensitive)
-TABLES = {
-    "users":        ["password", "profile_image", "extra_off", "extra_access"],
-    "clients":      ["logo_url", "system_links"],
-    "tasks":        [],
-    "message_logs": [],
-    "config":       [],
+# Columns to hide per table (too large or sensitive)
+SKIP = {
+    "users":   ["password", "profile_image", "extra_off", "extra_access"],
+    "clients": ["logo_url", "system_links"],
 }
 
 
@@ -42,13 +38,12 @@ def sep(width=110):
     print("─" * width)
 
 
-def print_rows(rows: list, skip_cols: list):
+def print_rows(rows: list):
     if not rows:
-        print("  (empty)")
+        print("  (empty)\n")
         return
 
-    columns = [c for c in rows[0].keys() if c not in skip_cols]
-
+    columns = list(rows[0].keys())
     widths = {col: len(col) for col in columns}
     for row in rows:
         for col in columns:
@@ -67,6 +62,35 @@ def print_rows(rows: list, skip_cols: list):
                 val = val[:32] + "..."
             values.append(val)
         print(fmt.format(*values))
+    print()
+
+
+def show_table(cur, table: str, limit: int = 100):
+    skip_cols = SKIP.get(table, [])
+
+    cur.execute(f"DESCRIBE `{table}`")
+    all_cols = [r["Field"] for r in cur.fetchall()]
+    visible = [c for c in all_cols if c not in skip_cols]
+    col_sql = ", ".join(f"`{c}`" for c in visible)
+
+    cur.execute(f"SELECT COUNT(*) AS cnt FROM `{table}`")
+    count = cur.fetchone()["cnt"]
+
+    sep()
+    hidden_note = f"  (hiding: {', '.join(skip_cols)})" if skip_cols else ""
+    print(f"TABLE: {table.upper()}  —  {count} row(s){hidden_note}")
+    sep()
+
+    if count == 0:
+        print("  (empty)\n")
+        return
+
+    cur.execute(f"SELECT {col_sql} FROM `{table}` LIMIT {limit}")
+    rows = cur.fetchall()
+    print_rows(rows)
+
+    if count > limit:
+        print(f"  ... showing {limit} of {count} rows\n")
 
 
 def main():
@@ -82,39 +106,44 @@ def main():
         with conn.cursor() as cur:
             cur.execute("SHOW TABLES")
             all_tables = [list(r.values())[0] for r in cur.fetchall()]
-            print(f"All tables in '{DB}' ({len(all_tables)} total):")
-            print("  " + ", ".join(all_tables))
-            print()
 
-            for table, skip_cols in TABLES.items():
-                sep()
-                if table not in all_tables:
-                    print(f"TABLE: {table.upper()}  —  does not exist yet")
-                    sep()
-                    print()
+        while True:
+            print("\n" + "=" * 50)
+            print(f"  DATABASE: {DB}")
+            print("=" * 50)
+            print(f"  0.  Show ALL tables")
+            for i, t in enumerate(all_tables, start=1):
+                marker = "  *" if t in SKIP else "   "
+                print(f"{marker} {i:2}.  {t}")
+            print("\n   q.  Quit")
+            print("=" * 50)
+            print("  * = some columns hidden (sensitive/large data)")
+            choice = input("\nEnter number (or q to quit): ").strip().lower()
+
+            if choice == "q":
+                print("Bye.\n")
+                break
+
+            if choice == "0":
+                with conn.cursor() as cur:
+                    for t in all_tables:
+                        show_table(cur, t)
+                continue
+
+            try:
+                idx = int(choice)
+                if idx < 1 or idx > len(all_tables):
+                    print(f"  Enter a number between 1 and {len(all_tables)}")
                     continue
+                table = all_tables[idx - 1]
+            except ValueError:
+                print("  Invalid input.")
+                continue
 
-                cur.execute(f"SELECT COUNT(*) AS cnt FROM `{table}`")
-                count = cur.fetchone()["cnt"]
-                hidden = f"  (hiding: {', '.join(skip_cols)})" if skip_cols else ""
-                print(f"TABLE: {table.upper()}  —  {count} row(s){hidden}")
-                sep()
+            with conn.cursor() as cur:
+                show_table(cur, table)
 
-                if count > 0:
-                    cur.execute(f"DESCRIBE `{table}`")
-                    all_cols = [r["Field"] for r in cur.fetchall()]
-                    select_cols = [c for c in all_cols if c not in skip_cols]
-                    col_sql = ", ".join(f"`{c}`" for c in select_cols)
-                    cur.execute(f"SELECT {col_sql} FROM `{table}` LIMIT 100")
-                    rows = cur.fetchall()
-                    print_rows(rows, [])
-                    if count > 100:
-                        print(f"\n  ... showing 100 of {count} rows")
-                else:
-                    print("  (empty)")
-                print()
-
-    print("Done.\n")
+            input("  Press Enter to return to menu...")
 
 
 if __name__ == "__main__":
