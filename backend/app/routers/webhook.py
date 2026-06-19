@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
 from app.services import openai_service, drive_service, sheets_service
@@ -44,23 +44,65 @@ _Add a new customer name to the Config sheet._
 Example: `/add-client Acme Corp`"""
 
 
-def _extract_event(payload: dict) -> dict:
-    if "body" in payload and isinstance(payload["body"], dict):
-        return payload["body"]
-    return payload
+def _verify_secret(request: Request) -> None:
+    """Reject requests that don't carry the correct Waumfy webhook secret."""
+    if not settings.waumfy_webhook_secret:
+        return
+    # Waumfy sends the secret as a Bearer token in the Authorization header
+    auth = request.headers.get("Authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+    if token != settings.waumfy_webhook_secret:
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
 
-async def _send_reply(reply_url: str, to_phone: str, text: str):
+def _parse_whapi_event(payload: dict) -> tuple[dict, str, str, str, bool]:
+    """
+    Parse a Whapi/Waumfy webhook payload.
+
+    Returns (msg, sender, sender_name, chat_id, from_me).
+    Raises ValueError if the payload doesn't contain a usable message.
+
+    Whapi payload shape:
+    {
+      "event": {"type": "messages", "event": "new"},
+      "messages": [{
+        "id": "...", "type": "text", "from_me": false,
+        "from": "919876543210@s.whatsapp.net",
+        "from_name": "John",
+        "chat_id": "919876543210@s.whatsapp.net",
+        "text": {"body": "hello"},      # for text messages
+        "audio": {"link": "https://..."} # for audio messages
+      }]
+    }
+    """
+    messages = payload.get("messages", [])
+    if not messages:
+        raise ValueError("no messages in payload")
+
+    msg = messages[0]
+    sender = msg.get("from", "").split("@")[0]  # strip @s.whatsapp.net
+    sender_name = msg.get("from_name") or sender
+    chat_id = msg.get("chat_id", msg.get("from", "")).split("@")[0]  # strip @s.whatsapp.net
+    from_me = msg.get("from_me", False)
+    return msg, sender, sender_name, chat_id, from_me
+
+
+async def _send_reply(chat_id: str, text: str) -> None:
+    """Send a text message via Waumfy outgoing trigger API."""
+    if not settings.waumfy_send_url:
+        logger.warning("WAUMFY_SEND_URL not set — reply not sent")
+        return
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                reply_url,
+            resp = await client.post(
+                settings.waumfy_send_url,
                 headers={
-                    "x-maytapi-key": settings.wa_token,
+                    "X-API-Key": settings.waumfy_api_key,
                     "Content-Type": "application/json",
                 },
-                json={"to_number": to_phone, "type": "text", "message": text},
+                json={"to": chat_id, "text": text},
             )
+            resp.raise_for_status()
     except Exception as exc:
         logger.warning("Failed to send reply: %s", exc)
 
@@ -90,7 +132,7 @@ async def _process_text(
     assigned_name, _ = sheets_service.lookup_employee_full_name(
         fields.get("assigned_name") or sender_name, config
     )
-    assigned_name = assigned_name or sender_name  # fallback to sender if not in Config
+    assigned_name = assigned_name or sender_name
     assigned_email = fields.get(
         "assigned_email_id"
     ) or sheets_service.lookup_employee_email(sender_name, config)
@@ -147,8 +189,7 @@ async def _process_text(
     return task_data, warning
 
 
-async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
-    # Detect file extension from URL
+async def _process_voice(media_url: str, sender: str, sender_name: str) -> tuple[dict, str]:
     ext = ".ogg"
     for candidate in [".ogg", ".mp3", ".mp4", ".m4a", ".wav", ".opus"]:
         if candidate in media_url.lower():
@@ -156,7 +197,10 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             break
 
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(media_url, headers={"x-maytapi-key": settings.wa_token})
+        resp = await client.get(
+            media_url,
+            headers={"X-API-Key": settings.waumfy_api_key},
+        )
         resp.raise_for_status()
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
         tmp.write(resp.content)
@@ -164,14 +208,12 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
         tmp.close()
 
     try:
-        # Transcribe (original language) + translate (to English)
         original_text, english_text = await openai_service.transcribe_audio(tmp.name)
         logger.info(
             "Voice transcription: %r | translation: %r", original_text, english_text
         )
 
-        # Upload to Google Drive (only if folder ID is set and upload succeeds)
-        drive_url = media_url  # fallback: save original WhatsApp URL
+        drive_url = media_url
         if settings.google_drive_folder_id:
             try:
                 filename = (
@@ -184,7 +226,6 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
                     "Drive upload failed, saving WhatsApp URL instead: %s", drive_err
                 )
 
-        # Extract task fields from the English translation
         config = sheets_service.get_config_lookup()
         fields = await openai_service.extract_task_fields(english_text)
 
@@ -207,9 +248,7 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
         assigned_name, _ = sheets_service.lookup_employee_full_name(
             fields.get("assigned_name") or sender_name, config
         )
-        assigned_name = (
-            assigned_name or sender_name
-        )  # fallback to sender if not in Config
+        assigned_name = assigned_name or sender_name
         assigned_email = fields.get(
             "assigned_email_id"
         ) or sheets_service.lookup_employee_email(sender_name, config)
@@ -259,7 +298,6 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
             "comments": fields.get("comments", ""),
             "source_link": drive_url,
             "status": "Pending",
-            # Store original + translation in message_type column
             "message_type": (
                 f"[Voice] {original_text}"
                 if original_text == english_text
@@ -275,57 +313,46 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> dict:
         os.unlink(tmp.name)
 
 
-async def _process_done(raw_text: str, sender: str, reply_url: str):
-    """Handle /done TASK-XXXX command."""
+async def _process_done(raw_text: str, sender: str, chat_id: str) -> None:
     match = re.search(r"(TASK-\d+)", raw_text, re.IGNORECASE)
     if not match:
-        await _send_reply(
-            reply_url,
-            sender,
-            "❌ Could not find a Task ID. Use format:\n/done TASK-0001",
-        )
+        await _send_reply(chat_id, "❌ Could not find a Task ID. Use format:\n/done TASK-0001")
         return
 
     task_id = match.group(1).upper()
     result = sheets_service.mark_task_done(task_id)
 
     if result is None:
-        await _send_reply(reply_url, sender, f"❌ Task {task_id} not found.")
+        await _send_reply(chat_id, f"❌ Task {task_id} not found.")
         return
 
-    await _send_reply(reply_url, sender, f"✅ *{task_id}* marked as *Done!*")
+    await _send_reply(chat_id, f"✅ *{task_id}* marked as *Done!*")
 
 
-async def _process_update(raw_text: str, sender: str, reply_url: str):
-    """Handle /update TASK-XXXX ... command."""
-    # Extract task ID from message e.g. "/update TASK-0003 email: ..."
+async def _process_update(raw_text: str, sender: str, chat_id: str) -> None:
     match = re.search(r"(TASK-\d+)", raw_text, re.IGNORECASE)
     if not match:
         await _send_reply(
-            reply_url,
-            sender,
+            chat_id,
             "❌ Could not find a Task ID. Use format:\n/update TASK-0001 department: Marketing, email: john@acme.com",
         )
         return
 
     task_id = match.group(1).upper()
-    update_text = raw_text[match.end() :].strip()  # everything after the task ID
+    update_text = raw_text[match.end():].strip()
 
     if not update_text:
         await _send_reply(
-            reply_url,
-            sender,
+            chat_id,
             f"❌ No update info provided. Example:\n/update {task_id} department: Marketing, email: john@acme.com",
         )
         return
 
-    # Use OpenAI to extract what fields to update
     updates = await openai_service.extract_update_fields(update_text)
 
     if not updates:
         await _send_reply(
-            reply_url,
-            sender,
+            chat_id,
             f"❌ Could not understand the update. Example:\n/update {task_id} department: Marketing, email: john@acme.com",
         )
         return
@@ -333,15 +360,13 @@ async def _process_update(raw_text: str, sender: str, reply_url: str):
     result = sheets_service.update_task(task_id, updates)
 
     if result is None:
-        await _send_reply(reply_url, sender, f"❌ Task {task_id} not found.")
+        await _send_reply(chat_id, f"❌ Task {task_id} not found.")
         return
 
-    # Send updated confirmation
     confirmation = sheets_service.build_confirmation_message(result)
     updated_fields = ", ".join(updates.keys())
     await _send_reply(
-        reply_url,
-        sender,
+        chat_id,
         f"✅ *{task_id}* updated!\nFields updated: {updated_fields}\n\n{confirmation}",
     )
 
@@ -354,69 +379,58 @@ async def webhook_verify(request: Request):
 
 @router.post("/webhook")
 async def webhook(request: Request):
+    _verify_secret(request)
+
     payload = await request.json()
     logger.info("WEBHOOK RECEIVED: %s", json.dumps(payload, indent=2))
 
-    event = _extract_event(payload)
-
-    if event.get("type") != "message":
+    try:
+        msg, sender, sender_name, chat_id, from_me = _parse_whapi_event(payload)
+    except ValueError as e:
+        logger.info("Ignored event: %s", e)
         return {"status": "ignored"}
 
-    msg = event.get("message", {})
-    user = event.get("user", {})
-    reply_url = event.get("reply", "")
-
-    msg_type = msg.get("type", "")
-    sender = user.get("phone", "") or user.get("id", "")
-    sender_name = user.get("name") or event.get("conversation_name") or sender
-    from_me = msg.get("fromMe", False)
-
-    logger.info("msg_type=%s sender=%s fromMe=%s", msg_type, sender, from_me)
+    # Only handle the messages.new event
+    event_meta = payload.get("event", {})
+    if event_meta.get("type") != "messages" or event_meta.get("event") != "new":
+        return {"status": "ignored"}
 
     if from_me:
         return {"status": "ignored"}
 
+    msg_type = msg.get("type", "")
+    logger.info("msg_type=%s sender=%s", msg_type, sender)
+
     task_data = None
-    client_warning = ""
+    warning = ""
     error = None
 
     try:
         if msg_type == "text":
-            body: str = msg.get("text", "")
+            body: str = (msg.get("text") or {}).get("body", "")
             logger.info("Text body: %r", body)
 
             if body.lower().strip() == "/help":
-                await _send_reply(reply_url, sender, HELP_MESSAGE)
+                await _send_reply(chat_id, HELP_MESSAGE)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/task"):
-                task_data, client_warning = await _process_text(
-                    body, sender, sender_name
-                )
+                task_data, warning = await _process_text(body, sender, sender_name)
 
             elif body.lower().startswith("/status"):
                 match = re.search(r"(TASK-\d+)", body, re.IGNORECASE)
                 if not match:
-                    await _send_reply(reply_url, sender, "❌ Usage: /status TASK-0001")
+                    await _send_reply(chat_id, "❌ Usage: /status TASK-0001")
                 else:
                     task = sheets_service.get_task_by_id(match.group(1).upper())
                     if not task:
-                        await _send_reply(
-                            reply_url,
-                            sender,
-                            f"❌ Task {match.group(1).upper()} not found.",
-                        )
+                        await _send_reply(chat_id, f"❌ Task {match.group(1).upper()} not found.")
                     else:
-                        await _send_reply(
-                            reply_url,
-                            sender,
-                            sheets_service.build_confirmation_message(task),
-                        )
+                        await _send_reply(chat_id, sheets_service.build_confirmation_message(task))
                 return {"status": "ok"}
 
             elif body.lower().strip() == "/my-tasks":
                 all_tasks = sheets_service.get_all_tasks()
-                # Match by sender phone OR assignee_contact
                 my_tasks = [
                     t
                     for t in all_tasks
@@ -428,9 +442,7 @@ async def webhook(request: Request):
                     not in ("done", "completed", "cancelled")
                 ]
                 if not my_tasks:
-                    await _send_reply(
-                        reply_url, sender, "✅ You have no pending tasks!"
-                    )
+                    await _send_reply(chat_id, "✅ You have no pending tasks!")
                 else:
                     lines = [f"📋 *Your Pending Tasks ({len(my_tasks)})*\n"]
                     for t in my_tasks:
@@ -438,72 +450,63 @@ async def webhook(request: Request):
                             f"• *{t.get('task_id')}* — {t.get('task_description') or 'No description'}\n"
                             f"  Priority: {t.get('priority') or '—'} | Due: {t.get('target_date') or '—'} | Status: {t.get('status') or '—'}"
                         )
-                    await _send_reply(reply_url, sender, "\n".join(lines))
+                    await _send_reply(chat_id, "\n".join(lines))
                 return {"status": "ok"}
 
             elif body.lower().startswith("/add-client"):
-                client_name = body[len("/add-client") :].strip()
+                client_name = body[len("/add-client"):].strip()
                 if not client_name:
                     await _send_reply(
-                        reply_url,
-                        sender,
+                        chat_id,
                         "❌ Please provide a client name.\nExample: `/add-client Acme Corp`",
                     )
                 else:
                     added = sheets_service.add_client_to_config(client_name)
                     if added:
-                        await _send_reply(
-                            reply_url,
-                            sender,
-                            f"✅ Client *{client_name}* added to Config successfully!",
-                        )
+                        await _send_reply(chat_id, f"✅ Client *{client_name}* added to Config successfully!")
                     else:
-                        await _send_reply(
-                            reply_url,
-                            sender,
-                            f"⚠️ Client *{client_name}* already exists in Config.",
-                        )
+                        await _send_reply(chat_id, f"⚠️ Client *{client_name}* already exists in Config.")
                 sheets_service.log_message(sender, msg_type, body, "", "")
                 return {"status": "ok"}
 
             elif body.lower().startswith("/done"):
-                await _process_done(body, sender, reply_url)
+                await _process_done(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
                 return {"status": "ok"}
 
             elif body.lower().startswith("/update"):
-                await _process_update(body, sender, reply_url)
+                await _process_update(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
                 return {"status": "ok"}
 
         elif msg_type in ("audio", "ptt", "voice"):
-            media_url = msg.get("url")
+            media_url = (
+                (msg.get("audio") or msg.get("voice") or msg.get("ptt") or {}).get("link")
+                or msg.get("url")
+            )
             if media_url:
-                task_data, client_warning = await _process_voice(
-                    media_url, sender, sender_name
-                )
+                task_data, warning = await _process_voice(media_url, sender, sender_name)
 
     except Exception as exc:
         logger.exception("Error processing message: %s", exc)
         error = str(exc)
-        if reply_url:
-            await _send_reply(
-                reply_url, sender, f"❌ Error processing your message: {exc}"
-            )
+        await _send_reply(chat_id, f"❌ Error processing your message: {exc}")
 
+    raw_text_log = (msg.get("text") or {}).get("body") or (
+        (msg.get("audio") or msg.get("voice") or msg.get("ptt") or {}).get("link") or ""
+    )
     sheets_service.log_message(
         sender=sender,
         msg_type=msg_type,
-        raw_text=msg.get("text") or msg.get("url") or "",
+        raw_text=raw_text_log,
         task_id=task_data.get("task_id", "") if task_data else "",
         error=error or "",
     )
 
-    # Send confirmation with filled/pending breakdown
-    if task_data and reply_url:
+    if task_data:
         confirmation = sheets_service.build_confirmation_message(task_data)
-        if client_warning:
-            confirmation += client_warning
-        await _send_reply(reply_url, sender, confirmation)
+        if warning:
+            confirmation += warning
+        await _send_reply(chat_id, confirmation)
 
     return {"status": "ok"}

@@ -161,7 +161,7 @@ def append_task(task_data: dict) -> None:
         .values()
         .append(
             spreadsheetId=settings.google_sheet_id,
-            range="Tasks!A:R",
+            range="Tasks!A:S",
             valueInputOption="USER_ENTERED",
             body={"values": [row]},
         )
@@ -176,7 +176,7 @@ def get_all_tasks(
     result = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=settings.google_sheet_id, range="Tasks!A2:R")
+        .get(spreadsheetId=settings.google_sheet_id, range="Tasks!A2:S")
         .execute()
     )
     rows = result.get("values", [])
