@@ -84,8 +84,8 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
 
     sender_phone = str(data.get("senderPhone", "")).strip()
     sender_name = data.get("senderName") or sender_phone
-    # Keep full JID (e.g. 12036...@g.us for groups) so Waumfy routes correctly
-    chat_id = data.get("from", sender_phone)
+    # Reply directly to the sender's phone number
+    chat_id = sender_phone
     return data, sender_phone, sender_name, chat_id
 
 
