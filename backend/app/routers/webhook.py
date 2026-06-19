@@ -84,8 +84,8 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
 
     sender_phone = str(data.get("senderPhone", "")).strip()
     sender_name = data.get("senderName") or sender_phone
-    # Reply to the chat the message came from (group or individual)
-    chat_id = data.get("from", sender_phone).split("@")[0]
+    # Keep full JID (e.g. 12036...@g.us for groups) so Waumfy routes correctly
+    chat_id = data.get("from", sender_phone)
     return data, sender_phone, sender_name, chat_id
 
 
@@ -104,9 +104,10 @@ async def _send_reply(chat_id: str, text: str) -> None:
                 },
                 json={"to": chat_id, "text": text},
             )
+            logger.info("Reply to %s → status=%s body=%s", chat_id, resp.status_code, resp.text[:300])
             resp.raise_for_status()
     except Exception as exc:
-        logger.warning("Failed to send reply: %s", exc)
+        logger.warning("Failed to send reply to %s: %s", chat_id, exc)
 
 
 async def _process_text(
