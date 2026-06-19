@@ -1,13 +1,13 @@
 CREATE TABLE IF NOT EXISTS config (
-    id          SERIAL PRIMARY KEY,
-    name        VARCHAR(255),       -- employee full name (col A)
-    email       VARCHAR(255),       -- employee email (col B)
-    role        VARCHAR(255),       -- role / designation (col C)
-    customer    VARCHAR(255),       -- client / customer name (col D)
-    department  VARCHAR(255)        -- department name (col E)
-);
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(255),
+    email       VARCHAR(255),
+    role        VARCHAR(255),
+    customer    VARCHAR(255),
+    department  VARCHAR(255),
 
-CREATE INDEX IF NOT EXISTS idx_config_name ON config (name);
-CREATE INDEX IF NOT EXISTS idx_config_email ON config (email);
-CREATE INDEX IF NOT EXISTS idx_config_customer ON config (customer);
-CREATE INDEX IF NOT EXISTS idx_config_department ON config (department);
+    INDEX idx_name (name),
+    INDEX idx_email (email),
+    INDEX idx_customer (customer),
+    INDEX idx_department (department)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

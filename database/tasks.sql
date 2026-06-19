@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS tasks (
-    id                  SERIAL PRIMARY KEY,
-    timestamp           TIMESTAMP NOT NULL DEFAULT NOW(),
-    task_id             VARCHAR(20) UNIQUE NOT NULL,        -- e.g. TASK-0001
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    task_id             VARCHAR(20) NOT NULL UNIQUE,        -- e.g. TASK-0001
     task_description    TEXT,
     assigned_by         VARCHAR(255),                       -- sender phone/name
     assignee_contact    VARCHAR(255),                       -- sender contact info
@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     source_link         TEXT,
     status              VARCHAR(50) DEFAULT 'Pending',      -- Pending / In Progress / Done
     message_type        VARCHAR(20),                        -- text / audio / image / etc.
-    updated_timestamp   TIMESTAMP
-);
+    updated_timestamp   DATETIME,
 
-CREATE INDEX IF NOT EXISTS idx_tasks_task_id ON tasks (task_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
-CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks (assigned_to);
-CREATE INDEX IF NOT EXISTS idx_tasks_target_date ON tasks (target_date);
+    INDEX idx_task_id (task_id),
+    INDEX idx_status (status),
+    INDEX idx_assigned_to (assigned_to),
+    INDEX idx_target_date (target_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
