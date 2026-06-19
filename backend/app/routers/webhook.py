@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -91,24 +92,29 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
 
 
 async def _send_reply(chat_id: str, text: str) -> None:
-    """Send a text message via Waumfy outgoing trigger API."""
+    """Send a text message via Waumfy outgoing trigger API, with retries for DNS/network failures."""
     if not settings.waumfy_send_url:
         logger.warning("WAUMFY_SEND_URL not set — reply not sent")
         return
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                settings.waumfy_send_url,
-                headers={
-                    "X-API-Key": settings.waumfy_api_key,
-                    "Content-Type": "application/json",
-                },
-                json={"to": chat_id, "text": text},
-            )
-            logger.info("Reply to %s → status=%s body=%s", chat_id, resp.status_code, resp.text[:300])
-            resp.raise_for_status()
-    except Exception as exc:
-        logger.warning("Failed to send reply to %s: %s", chat_id, exc)
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    settings.waumfy_send_url,
+                    headers={
+                        "X-API-Key": settings.waumfy_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={"to": chat_id, "text": text},
+                )
+                logger.info("Reply to %s → status=%s body=%s", chat_id, resp.status_code, resp.text[:300])
+                resp.raise_for_status()
+                return
+        except Exception as exc:
+            logger.warning("Reply attempt %d/3 failed for %s: %s", attempt + 1, chat_id, exc)
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)  # 1s, 2s
+    logger.error("All reply attempts failed for %s", chat_id)
 
 
 async def _process_text(
