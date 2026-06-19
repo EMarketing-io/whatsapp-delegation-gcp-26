@@ -38,7 +38,11 @@ steps:
         FRONTEND_URL=FRONTEND_URL:latest,
         WAUMFY_WEBHOOK_SECRET=WAUMFY_WEBHOOK_SECRET:latest,
         WAUMFY_SEND_URL=WAUMFY_SEND_URL:latest,
-        WAUMFY_API_KEY=WAUMFY_API_KEY:latest
+        WAUMFY_API_KEY=WAUMFY_API_KEY:latest,
+        DB_HOST=DB_HOST:latest,
+        DB_NAME=DB_NAME:latest,
+        DB_USER=DB_USER:latest,
+        DB_PASSWORD=DB_PASSWORD:latest
 
 substitutions:
   _REGION: asia-south1

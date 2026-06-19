@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     waumfy_send_url: str = ""   # https://api.aumpfy.com/api/apis/trigger/<slug>
     waumfy_api_key: str = ""    # X-API-Key header value
 
+    # MySQL Database
+    db_host: str = ""
+    db_name: str = ""
+    db_user: str = ""
+    db_password: str = ""
+
     # App
     frontend_url: str = "*"
 

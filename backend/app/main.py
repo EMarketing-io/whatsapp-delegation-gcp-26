@@ -6,10 +6,22 @@ from fastapi.responses import RedirectResponse
 
 from app.config import settings
 from app.routers import webhook, tasks
+from app.services import db_service
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="WhatsApp Delegation API", version="1.0.0")
+
+
+@app.on_event("startup")
+async def startup():
+    if settings.db_host:
+        await db_service.get_pool()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await db_service.close_pool()
 
 app.add_middleware(
     CORSMiddleware,
