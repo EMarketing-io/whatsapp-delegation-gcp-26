@@ -79,9 +79,13 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
         chat_id = from_jid  # e.g. "120363400573269993@g.us"
         raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
     elif "@s.whatsapp.net" in from_jid:
-        # Direct message — reply to the sender's number
+        # Direct message (standard format) — reply to the sender's number
         raw_phone = from_jid.split("@")[0].lstrip("+")
         chat_id = raw_phone
+    elif "@lid" in from_jid:
+        # Direct message (privacy-protected LID format) — reply to full LID JID
+        chat_id = from_jid  # e.g. "120907657961574@lid"
+        raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+") or from_jid.split("@")[0]
     else:
         raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
         chat_id = raw_phone
