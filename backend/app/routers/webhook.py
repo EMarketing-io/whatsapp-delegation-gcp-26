@@ -72,6 +72,9 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     if not data:
         raise ValueError("no data in payload")
 
+    if data.get("fromMe"):
+        raise ValueError("ignoring own outgoing message (fromMe=true)")
+
     from_jid = str(data.get("from", "")).strip()
     raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
     chat_type = data.get("chatType", "")  # "individual" or "group"
