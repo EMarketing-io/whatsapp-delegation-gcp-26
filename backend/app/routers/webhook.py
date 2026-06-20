@@ -78,24 +78,33 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     from_jid = str(data.get("from", "")).strip()
     raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
     chat_type = data.get("chatType", "")  # "individual" or "group"
-
-    # senderPhone for group messages is sometimes a WhatsApp internal ID (15-digit, starts with 120).
-    # The real phone number is embedded in the participant JID: "919876543210@s.whatsapp.net"
     participant_jid = str(data.get("participant", "")).strip()
-    if participant_jid and "@" in participant_jid:
-        participant_phone = participant_jid.split("@")[0].lstrip("+")
-    else:
-        participant_phone = ""
+    sender_name = data.get("senderName", "")
 
-    if raw_phone.startswith("120") and len(raw_phone) >= 12 and participant_phone:
-        raw_phone = participant_phone
+    # Log raw fields so we can see exactly what Waumfy is sending
+    logger.info(
+        "RAW FIELDS — chat_type=%s from=%s senderPhone=%s participant=%s senderName=%s",
+        chat_type, from_jid, raw_phone, participant_jid, sender_name,
+    )
+
+    # senderPhone starting with 120 (≥12 digits) is a WhatsApp internal ID, not a real number.
+    # Try participant JID first — but only if it ends with @s.whatsapp.net (not @lid).
+    # @lid is also privacy-protected and won't contain a real phone.
+    if raw_phone.startswith("120") and len(raw_phone) >= 12:
+        if participant_jid.endswith("@s.whatsapp.net"):
+            raw_phone = participant_jid.split("@")[0].lstrip("+")
+            logger.info("Phone resolved from participant JID: %s", raw_phone)
+        else:
+            # participant is @lid or missing — we cannot resolve a real phone from the payload.
+            # Leave raw_phone as-is; the caller can cross-reference by senderName.
+            logger.info("Cannot resolve real phone — participant=%s (not @s.whatsapp.net)", participant_jid)
 
     # Use from JID directly — Waumfy normalizes @s.whatsapp.net, @lid, @g.us on their end
     chat_id = from_jid
 
     sender_phone = f"+{raw_phone}" if raw_phone else ""
-    sender_name = data.get("senderName") or sender_phone
-    logger.info("chat_type=%s from=%s senderPhone=%s senderName=%s", chat_type, from_jid, raw_phone, sender_name)
+    sender_name = sender_name or sender_phone
+    logger.info("RESOLVED — sender_phone=%s sender_name=%s chat_id=%s", sender_phone, sender_name, chat_id)
     return data, sender_phone, sender_name, chat_id
 
 
@@ -412,8 +421,15 @@ async def webhook(request: Request):
         logger.info("Ignored event: %s", e)
         return {"status": "ignored"}
 
+    # If senderPhone is still an internal WhatsApp ID, fall back to users table lookup by name
+    if sender.lstrip("+").startswith("120") and len(sender.lstrip("+")) >= 12:
+        resolved = await db_service.lookup_phone_by_name(sender_name)
+        if resolved:
+            logger.info("Phone resolved from users table: %s → %s", sender, resolved)
+            sender = resolved
+
     msg_type = data.get("type", "")
-    logger.info("msg_type=%s sender=%s chat_id=%s", msg_type, sender, chat_id)
+    logger.info("msg_type=%s sender=%s sender_name=%s chat_id=%s", msg_type, sender, sender_name, chat_id)
 
     task_data = None
     warning = ""

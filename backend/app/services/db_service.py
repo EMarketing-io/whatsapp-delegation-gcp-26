@@ -66,6 +66,23 @@ async def fetchone(query: str, args: tuple = ()) -> dict | None:
 
 # ── Domain helpers ────────────────────────────────────────────────────────────
 
+async def lookup_phone_by_name(name: str) -> str:
+    """Return the phone from the users table for a given name, or '' if not found."""
+    if not name:
+        return ""
+    row = await fetchone(
+        "SELECT phone FROM users WHERE name = %s LIMIT 1", (name,)
+    )
+    phone = (row or {}).get("phone", "")
+    if phone:
+        # Normalize: strip leading zeros/+, ensure it starts with country code
+        phone = str(phone).strip().lstrip("+")
+        if phone and not phone.startswith("91") and len(phone) == 10:
+            phone = "91" + phone
+        return f"+{phone}"
+    return ""
+
+
 async def insert_task(task: dict) -> None:
     await execute(
         """
