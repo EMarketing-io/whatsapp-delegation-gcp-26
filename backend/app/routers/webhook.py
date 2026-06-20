@@ -79,12 +79,23 @@ def _parse_waumfy_event(payload: dict) -> tuple[dict, str, str, str]:
     raw_phone = str(data.get("senderPhone", "")).strip().lstrip("+")
     chat_type = data.get("chatType", "")  # "individual" or "group"
 
+    # senderPhone for group messages is sometimes a WhatsApp internal ID (15-digit, starts with 120).
+    # The real phone number is embedded in the participant JID: "919876543210@s.whatsapp.net"
+    participant_jid = str(data.get("participant", "")).strip()
+    if participant_jid and "@" in participant_jid:
+        participant_phone = participant_jid.split("@")[0].lstrip("+")
+    else:
+        participant_phone = ""
+
+    if raw_phone.startswith("120") and len(raw_phone) >= 12 and participant_phone:
+        raw_phone = participant_phone
+
     # Use from JID directly — Waumfy normalizes @s.whatsapp.net, @lid, @g.us on their end
     chat_id = from_jid
 
     sender_phone = f"+{raw_phone}" if raw_phone else ""
     sender_name = data.get("senderName") or sender_phone
-    logger.info("chat_type=%s from=%s senderPhone=%s", chat_type, from_jid, raw_phone)
+    logger.info("chat_type=%s from=%s senderPhone=%s senderName=%s", chat_type, from_jid, raw_phone, sender_name)
     return data, sender_phone, sender_name, chat_id
 
 
@@ -471,19 +482,19 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, f"⚠️ Client *{client_name}* already exists in Config.")
                 sheets_service.log_message(sender, msg_type, body, "", "")
-                await db_service.log_message(sender, msg_type, body)
+                await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/done"):
                 await _process_done(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
-                await db_service.log_message(sender, msg_type, body)
+                await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/update"):
                 await _process_update(body, sender, chat_id)
                 sheets_service.log_message(sender, msg_type, body, "", "")
-                await db_service.log_message(sender, msg_type, body)
+                await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             # ── Plain natural language — classify with AI ────────
@@ -502,7 +513,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task is done? Reply with:\n`/done TASK-0001`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
-                    await db_service.log_message(sender, msg_type, body, task_id)
+                    await db_service.log_message(sender, msg_type, body, task_id, sender_name=sender_name)
                     return {"status": "ok"}
 
                 elif intent == "update":
@@ -511,7 +522,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task to update? Reply with:\n`/update TASK-0001 <details>`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
-                    await db_service.log_message(sender, msg_type, body, task_id)
+                    await db_service.log_message(sender, msg_type, body, task_id, sender_name=sender_name)
                     return {"status": "ok"}
 
                 elif intent == "status":
@@ -524,7 +535,7 @@ async def webhook(request: Request):
                     else:
                         await _send_reply(chat_id, "Which task? Reply with:\n`/status TASK-0001`")
                     sheets_service.log_message(sender, msg_type, body, task_id, "")
-                    await db_service.log_message(sender, msg_type, body, task_id)
+                    await db_service.log_message(sender, msg_type, body, task_id, sender_name=sender_name)
                     return {"status": "ok"}
 
                 elif intent == "my_tasks":
@@ -548,7 +559,7 @@ async def webhook(request: Request):
                             )
                         await _send_reply(chat_id, "\n".join(lines))
                     sheets_service.log_message(sender, msg_type, body, "", "")
-                    await db_service.log_message(sender, msg_type, body)
+                    await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                     return {"status": "ok"}
 
                 elif intent == "help":
@@ -573,7 +584,7 @@ async def webhook(request: Request):
     raw = data.get("body") or data.get("url") or ""
     tid = task_data.get("task_id", "") if task_data else ""
     sheets_service.log_message(sender=sender, msg_type=msg_type, raw_text=raw, task_id=tid, error=error or "")
-    await db_service.log_message(sender, msg_type, raw, tid, error or "")
+    await db_service.log_message(sender, msg_type, raw, tid, error or "", sender_name=sender_name)
 
     if task_data:
         confirmation = sheets_service.build_confirmation_message(task_data)

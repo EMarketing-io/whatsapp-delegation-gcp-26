@@ -126,15 +126,17 @@ async def update_task(task_id: str, updates: dict) -> None:
 
 
 async def log_message(sender: str, msg_type: str, raw_text: str,
-                      task_id: str = "", error: str = "") -> None:
+                      task_id: str = "", error: str = "",
+                      sender_name: str = "") -> None:
     await execute(
         """
-        INSERT INTO message_logs (timestamp, sender, msg_type, raw_text, task_id, error)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO message_logs (timestamp, sender, sender_name, msg_type, raw_text, task_id, error)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         (
             datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             sender,
+            sender_name or None,
             msg_type,
             raw_text[:500],
             task_id or None,
