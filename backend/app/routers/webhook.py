@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
-from app.services import openai_service, drive_service, sheets_service, db_service
+from app.services import openai_service, drive_service, db_service
 
 logger = logging.getLogger("webhook")
 router = APIRouter()
@@ -137,58 +137,49 @@ async def _send_reply(chat_id: str, text: str) -> None:
 async def _process_text(
     raw_text: str, sender: str, sender_name: str
 ) -> tuple[dict, str]:
-    config = sheets_service.get_config_lookup()
+    config = await db_service.get_config_lookup()
     fields = await openai_service.extract_task_fields(raw_text)
 
     raw_assigned_to = fields.get("assigned_to", "")
-    assigned_to, assignee_matched = sheets_service.lookup_employee_full_name(
-        raw_assigned_to, config
-    )
-    employee_email = fields.get(
-        "employee_email_id"
-    ) or sheets_service.lookup_employee_email(assigned_to, config)
+    assigned_to, assignee_matched = db_service.lookup_employee_full_name(raw_assigned_to, config)
+    employee_email = fields.get("employee_email_id") or db_service.lookup_employee_email(assigned_to, config)
     assignee_warning = (
         ""
         if assignee_matched or not raw_assigned_to
         else (
-            f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the Config list. "
+            f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the users list. "
             f"Please reply:\n`/update {{TASK_ID}} assigned_to: <correct name>`\nto fix this task."
         )
     )
 
-    assigned_name, _ = sheets_service.lookup_employee_full_name(
-        fields.get("assigned_name") or sender_name, config
-    )
+    assigned_name, _ = db_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
     assigned_name = assigned_name or sender_name
-    assigned_email = fields.get(
-        "assigned_email_id"
-    ) or sheets_service.lookup_employee_email(sender_name, config)
+    assigned_email = fields.get("assigned_email_id") or db_service.lookup_employee_email(sender_name, config)
+
     raw_client = fields.get("client_name", "")
-    client_name, client_matched = sheets_service.lookup_customer_name(
-        raw_client, config
-    )
+    client_name, client_matched = db_service.lookup_customer_name(raw_client, config)
     client_warning = (
         ""
         if client_matched or not raw_client
         else (
-            f"\n⚠️ Client *{raw_client}* was not found in the Config list. "
+            f"\n⚠️ Client *{raw_client}* was not found. "
             f"Please use `/add-client <correct name>` to add it, then reply:\n"
             f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
         )
     )
 
     raw_dept = fields.get("department", "")
-    department, dept_matched = sheets_service.lookup_department_name(raw_dept, config)
+    department, dept_matched = db_service.lookup_department_name(raw_dept, config)
     dept_warning = (
         ""
         if dept_matched or not raw_dept
         else (
-            f"\n⚠️ Department *{raw_dept}* was not found in the Config list. "
+            f"\n⚠️ Department *{raw_dept}* was not found. "
             f"Please reply:\n`/update {{TASK_ID}} department: <correct department>`\nto fix this task."
         )
     )
 
-    task_id = sheets_service.get_next_task_id()
+    task_id = await db_service.get_next_task_id()
     task_data = {
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "task_id": task_id,
@@ -209,11 +200,8 @@ async def _process_text(
         "status": "Pending",
         "message_type": raw_text,
     }
-    sheets_service.append_task(task_data)
     await db_service.insert_task(task_data)
-    warning = (assignee_warning + client_warning + dept_warning).replace(
-        "{TASK_ID}", task_id
-    )
+    warning = (assignee_warning + client_warning + dept_warning).replace("{TASK_ID}", task_id)
     return task_data, warning
 
 
@@ -254,60 +242,49 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> tuple
                     "Drive upload failed, saving WhatsApp URL instead: %s", drive_err
                 )
 
-        config = sheets_service.get_config_lookup()
+        config = await db_service.get_config_lookup()
         fields = await openai_service.extract_task_fields(english_text)
 
         raw_assigned_to = fields.get("assigned_to", "")
-        assigned_to, assignee_matched = sheets_service.lookup_employee_full_name(
-            raw_assigned_to, config
-        )
-        employee_email = fields.get(
-            "employee_email_id"
-        ) or sheets_service.lookup_employee_email(assigned_to, config)
+        assigned_to, assignee_matched = db_service.lookup_employee_full_name(raw_assigned_to, config)
+        employee_email = fields.get("employee_email_id") or db_service.lookup_employee_email(assigned_to, config)
         assignee_warning = (
             ""
             if assignee_matched or not raw_assigned_to
             else (
-                f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the Config list. "
+                f"\n⚠️ Assignee *{raw_assigned_to}* was not found in the users list. "
                 f"Please reply:\n`/update {{TASK_ID}} assigned_to: <correct name>`\nto fix this task."
             )
         )
 
-        assigned_name, _ = sheets_service.lookup_employee_full_name(
-            fields.get("assigned_name") or sender_name, config
-        )
+        assigned_name, _ = db_service.lookup_employee_full_name(fields.get("assigned_name") or sender_name, config)
         assigned_name = assigned_name or sender_name
-        assigned_email = fields.get(
-            "assigned_email_id"
-        ) or sheets_service.lookup_employee_email(sender_name, config)
+        assigned_email = fields.get("assigned_email_id") or db_service.lookup_employee_email(sender_name, config)
+
         raw_client = fields.get("client_name", "")
-        client_name, client_matched = sheets_service.lookup_customer_name(
-            raw_client, config
-        )
+        client_name, client_matched = db_service.lookup_customer_name(raw_client, config)
         client_warning = (
             ""
             if client_matched or not raw_client
             else (
-                f"\n⚠️ Client *{raw_client}* was not found in the Config list. "
+                f"\n⚠️ Client *{raw_client}* was not found. "
                 f"Please use `/add-client <correct name>` to add it, then reply:\n"
                 f"`/update {{TASK_ID}} client: <correct client name>`\nto fix this task."
             )
         )
 
         raw_dept = fields.get("department", "")
-        department, dept_matched = sheets_service.lookup_department_name(
-            raw_dept, config
-        )
+        department, dept_matched = db_service.lookup_department_name(raw_dept, config)
         dept_warning = (
             ""
             if dept_matched or not raw_dept
             else (
-                f"\n⚠️ Department *{raw_dept}* was not found in the Config list. "
+                f"\n⚠️ Department *{raw_dept}* was not found. "
                 f"Please reply:\n`/update {{TASK_ID}} department: <correct department>`\nto fix this task."
             )
         )
 
-        task_id = sheets_service.get_next_task_id()
+        task_id = await db_service.get_next_task_id()
         task_data = {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "task_id": task_id,
@@ -332,11 +309,8 @@ async def _process_voice(media_url: str, sender: str, sender_name: str) -> tuple
                 else f"[Voice] {original_text} | [EN] {english_text}"
             ),
         }
-        sheets_service.append_task(task_data)
         await db_service.insert_task(task_data)
-        warning = (assignee_warning + client_warning + dept_warning).replace(
-            "{TASK_ID}", task_id
-        )
+        warning = (assignee_warning + client_warning + dept_warning).replace("{TASK_ID}", task_id)
         return task_data, warning
     finally:
         os.unlink(tmp.name)
@@ -349,13 +323,11 @@ async def _process_done(raw_text: str, sender: str, chat_id: str) -> None:
         return
 
     task_id = match.group(1).upper()
-    result = sheets_service.mark_task_done(task_id)
     await db_service.mark_task_done(task_id)
-
-    if result is None:
+    task = await db_service.get_task_by_id(task_id)
+    if not task:
         await _send_reply(chat_id, f"❌ Task {task_id} not found.")
         return
-
     await _send_reply(chat_id, f"✅ *{task_id}* marked as *Done!*")
 
 
@@ -387,14 +359,14 @@ async def _process_update(raw_text: str, sender: str, chat_id: str) -> None:
         )
         return
 
-    result = sheets_service.update_task(task_id, updates)
     await db_service.update_task(task_id, updates)
+    result = await db_service.get_task_by_id(task_id)
 
-    if result is None:
+    if not result:
         await _send_reply(chat_id, f"❌ Task {task_id} not found.")
         return
 
-    confirmation = sheets_service.build_confirmation_message(result)
+    confirmation = db_service.build_confirmation_message(result)
     updated_fields = ", ".join(updates.keys())
     await _send_reply(
         chat_id,
@@ -458,25 +430,15 @@ async def webhook(request: Request):
                 if not match:
                     await _send_reply(chat_id, "❌ Usage: /status TASK-0001")
                 else:
-                    task = sheets_service.get_task_by_id(match.group(1).upper())
+                    task = await db_service.get_task_by_id(match.group(1).upper())
                     if not task:
                         await _send_reply(chat_id, f"❌ Task {match.group(1).upper()} not found.")
                     else:
-                        await _send_reply(chat_id, sheets_service.build_confirmation_message(task))
+                        await _send_reply(chat_id, db_service.build_confirmation_message(task))
                 return {"status": "ok"}
 
             elif body.lower().strip() == "/my-tasks":
-                all_tasks = sheets_service.get_all_tasks()
-                my_tasks = [
-                    t
-                    for t in all_tasks
-                    if (
-                        t.get("assignee_contact") == sender
-                        or t.get("assignee_contact") == f"+{sender}"
-                    )
-                    and t.get("status", "").lower()
-                    not in ("done", "completed", "cancelled")
-                ]
+                my_tasks = await db_service.get_my_tasks(sender)
                 if not my_tasks:
                     await _send_reply(chat_id, "✅ You have no pending tasks!")
                 else:
@@ -492,36 +454,29 @@ async def webhook(request: Request):
             elif body.lower().startswith("/add-client"):
                 client_name = body[len("/add-client"):].strip()
                 if not client_name:
-                    await _send_reply(
-                        chat_id,
-                        "❌ Please provide a client name.\nExample: `/add-client Acme Corp`",
-                    )
+                    await _send_reply(chat_id, "❌ Please provide a client name.\nExample: `/add-client Acme Corp`")
                 else:
-                    added = sheets_service.add_client_to_config(client_name)
+                    added = await db_service.add_client(client_name)
                     if added:
-                        await _send_reply(chat_id, f"✅ Client *{client_name}* added to Config successfully!")
+                        await _send_reply(chat_id, f"✅ Client *{client_name}* added successfully!")
                     else:
-                        await _send_reply(chat_id, f"⚠️ Client *{client_name}* already exists in Config.")
-                sheets_service.log_message(sender, msg_type, body, "", "")
+                        await _send_reply(chat_id, f"⚠️ Client *{client_name}* already exists.")
                 await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/done"):
                 await _process_done(body, sender, chat_id)
-                sheets_service.log_message(sender, msg_type, body, "", "")
                 await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             elif body.lower().startswith("/update"):
                 await _process_update(body, sender, chat_id)
-                sheets_service.log_message(sender, msg_type, body, "", "")
                 await db_service.log_message(sender, msg_type, body, sender_name=sender_name)
                 return {"status": "ok"}
 
             else:
-                # Unknown slash command
                 logger.info("Unknown command: %r", body.split()[0])
-                await _send_reply(chat_id, f"❓ Unknown command. Type `/help` to see all available commands.")
+                await _send_reply(chat_id, "❓ Unknown command. Type `/help` to see all available commands.")
 
         elif msg_type in ("audio", "ptt", "voice"):
             media_url = data.get("url") or data.get("mediaUrl") or data.get("link")
@@ -535,11 +490,10 @@ async def webhook(request: Request):
 
     raw = data.get("body") or data.get("url") or ""
     tid = task_data.get("task_id", "") if task_data else ""
-    sheets_service.log_message(sender=sender, msg_type=msg_type, raw_text=raw, task_id=tid, error=error or "")
     await db_service.log_message(sender, msg_type, raw, tid, error or "", sender_name=sender_name)
 
     if task_data:
-        confirmation = sheets_service.build_confirmation_message(task_data)
+        confirmation = db_service.build_confirmation_message(task_data)
         if warning:
             confirmation += warning
         await _send_reply(chat_id, confirmation)

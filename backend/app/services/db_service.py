@@ -66,6 +66,162 @@ async def fetchone(query: str, args: tuple = ()) -> dict | None:
 
 # ── Domain helpers ────────────────────────────────────────────────────────────
 
+async def get_next_task_id() -> str:
+    row = await fetchone("SELECT COUNT(*) AS cnt FROM tasks")
+    count = (row or {}).get("cnt", 0)
+    return f"TASK-{count + 1:04d}"
+
+
+# ── Config / lookup helpers (replacing Google Sheets Config tab) ──────────────
+
+async def get_config_lookup() -> dict:
+    """Load employees and clients from DB into a config dict matching the sheets_service shape."""
+    users = await fetchall(
+        "SELECT name, email, department FROM users WHERE role != 'client' AND name != '' AND email != ''"
+    )
+    clients = await fetchall("SELECT name FROM clients WHERE is_active = 1 ORDER BY name")
+    departments = sorted({u["department"] for u in users if u.get("department")})
+
+    employees = {}       # lower_name → email
+    employee_names = {}  # lower_name → display_name
+    for u in users:
+        key = u["name"].strip().lower()
+        employees[key] = (u["email"] or "").strip()
+        employee_names[key] = u["name"].strip()
+
+    return {
+        "employees": employees,
+        "employee_names": employee_names,
+        "customers": [c["name"] for c in clients],
+        "departments": departments,
+    }
+
+
+def _fuzzy_find(needle: str, haystack: list[str]) -> tuple[str, bool]:
+    if not needle or not needle.strip():
+        return "", False
+    n = needle.strip().lower()
+    for item in haystack:
+        if n in item.lower() or item.lower() in n:
+            return item, True
+    return "", False
+
+
+def lookup_employee_full_name(name: str, config: dict) -> tuple[str, bool]:
+    if not name:
+        return "", False
+    needle = name.strip().lower()
+    full_names = config["employee_names"]
+    employees = config["employees"]
+    # exact
+    if needle in full_names:
+        return full_names[needle], True
+    # partial
+    for key in full_names:
+        if needle in key or key in needle:
+            return full_names[key], True
+    return "", False
+
+
+def lookup_employee_email(name: str, config: dict) -> str:
+    if not name:
+        return ""
+    needle = name.strip().lower()
+    employees = config["employees"]
+    if needle in employees:
+        return employees[needle]
+    for key, email in employees.items():
+        if needle in key or key in needle:
+            return email
+    return ""
+
+
+def lookup_customer_name(mentioned: str, config: dict) -> tuple[str, bool]:
+    return _fuzzy_find(mentioned, config["customers"])
+
+
+def lookup_department_name(mentioned: str, config: dict) -> tuple[str, bool]:
+    return _fuzzy_find(mentioned, config["departments"])
+
+
+async def add_client(name: str) -> bool:
+    """Insert a new client. Returns False if already exists."""
+    existing = await fetchone("SELECT id FROM clients WHERE LOWER(name) = LOWER(%s)", (name,))
+    if existing:
+        return False
+    await execute("INSERT INTO clients (name) VALUES (%s)", (name,))
+    logger.info("New client added: %s", name)
+    return True
+
+
+# ── Task read helpers ─────────────────────────────────────────────────────────
+
+async def get_task_by_id(task_id: str) -> dict | None:
+    return await fetchone("SELECT * FROM tasks WHERE task_id = %s", (task_id,))
+
+
+async def get_all_tasks(status: str = None) -> list[dict]:
+    if status:
+        rows = await fetchall("SELECT * FROM tasks WHERE status = %s ORDER BY id DESC", (status,))
+    else:
+        rows = await fetchall("SELECT * FROM tasks ORDER BY id DESC")
+    return [dict(r) for r in rows]
+
+
+async def get_my_tasks(sender: str) -> list[dict]:
+    phone = sender.lstrip("+")
+    rows = await fetchall(
+        """SELECT * FROM tasks
+           WHERE (assignee_contact = %s OR assignee_contact = %s)
+             AND status NOT IN ('Done','Completed','Cancelled')
+           ORDER BY id DESC""",
+        (sender, f"+{phone}"),
+    )
+    return [dict(r) for r in rows]
+
+
+# ── Confirmation message (replaces sheets_service.build_confirmation_message) ─
+
+TASK_DISPLAY_NAMES = {
+    "task_description": "Task Description",
+    "assigned_to": "Assigned To",
+    "employee_email_id": "Employee Email",
+    "target_date": "Target Date",
+    "priority": "Priority",
+    "approval_needed": "Approval Needed",
+    "client_name": "Client Name",
+    "department": "Department",
+    "assigned_name": "Assigned Name",
+    "assigned_email_id": "Assigned Email",
+    "comments": "Comments",
+}
+
+
+def build_confirmation_message(task: dict) -> str:
+    filled, pending = [], []
+    for col, label in TASK_DISPLAY_NAMES.items():
+        val = str(task.get(col) or "").strip()
+        if val:
+            filled.append(f"  • {label}: {val}")
+        else:
+            pending.append(f"  • {label}")
+
+    tid = task.get("task_id", "")
+    lines = [f"✅ Task Recorded! ID: *{tid}*", ""]
+    if filled:
+        lines.append("📋 *Details Recorded:*")
+        lines.extend(filled)
+    if pending:
+        lines += ["", "⏳ *Pending Details:*"]
+        lines.extend(pending)
+        lines += [
+            "",
+            f"To fill pending details, reply:\n*/update {tid}*\nfollowed by the missing info.",
+            f"\nExample:\n/update {tid} department: Marketing, email: john@acme.com, approval: yes",
+        ]
+    return "\n".join(lines)
+
+
 async def lookup_phone_by_name(name: str) -> str:
     """Return the phone from the users table for a given name, or '' if not found."""
     if not name:
